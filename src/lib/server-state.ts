@@ -1,14 +1,28 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { kv } from "@vercel/kv";
+import { createClient } from "@vercel/kv";
 import { AppState, createDefaultState } from "./types";
 
 const STATE_KEY = "aquashift:state";
 const DATA_DIR = path.join(process.cwd(), ".data");
 const DATA_FILE = path.join(DATA_DIR, "state.json");
 
-function useKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+/** Upstash (Marketplace) or legacy Vercel KV env names */
+function redisCredentials(): { url: string; token: string } | null {
+  const url =
+    process.env.KV_REST_API_URL ??
+    process.env.UPSTASH_REDIS_REST_URL ??
+    process.env.KV_URL;
+  const token =
+    process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+  return { url, token };
+}
+
+function getKv() {
+  const creds = redisCredentials();
+  if (!creds) return null;
+  return createClient({ url: creds.url, token: creds.token });
 }
 
 async function readFileState(): Promise<AppState> {
@@ -26,7 +40,8 @@ async function writeFileState(state: AppState): Promise<void> {
 }
 
 export async function getServerState(): Promise<AppState> {
-  if (useKv()) {
+  const kv = getKv();
+  if (kv) {
     const data = await kv.get<AppState>(STATE_KEY);
     return data ?? createDefaultState();
   }
@@ -34,7 +49,8 @@ export async function getServerState(): Promise<AppState> {
 }
 
 export async function setServerState(state: AppState): Promise<void> {
-  if (useKv()) {
+  const kv = getKv();
+  if (kv) {
     await kv.set(STATE_KEY, state);
     return;
   }
@@ -42,5 +58,5 @@ export async function setServerState(state: AppState): Promise<void> {
 }
 
 export function storageMode(): "kv" | "file" {
-  return useKv() ? "kv" : "file";
+  return redisCredentials() ? "kv" : "file";
 }

@@ -30,13 +30,19 @@ No need to edit code anymore.
 
 **3. Enable shared storage (required for production)**
 
-On Vercel, data must live in **Vercel KV** (otherwise each server instance would not share state):
+Vercel no longer has a standalone “KV” button. Use **Upstash Redis** from the Marketplace (this is what powers shared data):
 
-1. Open your project on Vercel → **Storage** → **Create Database** → **KV**
-2. Connect it to the project — Vercel adds `KV_REST_API_URL` and `KV_REST_API_TOKEN` automatically
-3. **Redeploy** the app
+1. Open your **water-cooler** project on [vercel.com](https://vercel.com)
+2. Go to the **Storage** tab (left sidebar), or open [vercel.com/marketplace/upstash](https://vercel.com/marketplace/upstash)
+3. Click **Install** on **Upstash** → choose **Upstash for Redis** (sometimes labeled “Upstash KV”)
+4. Sign in / create a free Upstash account when prompted
+5. **Create a new Redis database** (or pick an existing one) and **link it to your Vercel project**
+6. Vercel will add env vars like `KV_REST_API_URL` / `KV_REST_API_TOKEN` or `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`
+7. **Redeploy** the project (Deployments → ⋯ on latest → Redeploy)
 
-Without KV, `npm run dev` still works locally (data is saved in `.data/state.json` on your machine).
+After redeploy, the login screen should say **“Synced across all devices”** (not “local dev”).
+
+Without this, production may not share data between phones. Local `npm run dev` still uses `.data/state.json` on your PC.
 
 ## Run locally
 
