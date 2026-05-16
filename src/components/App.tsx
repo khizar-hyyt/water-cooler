@@ -2,21 +2,20 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  ROOMMATES, Roommate, Turn, Score,
-  getSavedUser, saveUser,
-  getAttendanceStatus, setAttendance,
-  addTurn, getTurnsForDate,
-  getScores, getSuggestedNext,
-  runMidnightCalc, getMissedCarry,
-  today,
+  Roommate, Turn, Score,
+  getSavedUser, saveUserId,
+  getAttendanceStatus, getTurnsForDate,
+  getScores, getSuggestedNext, getMissedCarry,
+  findRoommate, today,
 } from "@/lib/store";
+import { useAppState } from "@/lib/AppStateContext";
+import ManageUsers from "@/components/ManageUsers";
 import {
   Droplets, CheckCircle2, Home, Plane, Crown,
   RefreshCw, LogOut, LayoutDashboard, Calendar,
   ChevronLeft, ChevronRight, AlertCircle, Zap,
+  Users, Cloud, CloudOff,
 } from "lucide-react";
-
-// ─── helpers ────────────────────────────────────────────────────────────────
 
 function fmt(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -32,9 +31,17 @@ function clx(...args: (string | false | null | undefined)[]) {
   return args.filter(Boolean).join(" ");
 }
 
-// ─── select screen ──────────────────────────────────────────────────────────
-
 function SelectScreen({ onSelect }: { onSelect: (r: Roommate) => void }) {
+  const { state, loading, error, storage } = useAppState();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Droplets className="w-8 h-8 text-sky-500 animate-pulse" />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-xs">
@@ -46,12 +53,18 @@ function SelectScreen({ onSelect }: { onSelect: (r: Roommate) => void }) {
           <p className="text-slate-400 text-sm text-center">Water cooler duty tracker</p>
         </div>
 
+        {error && (
+          <p className="text-rose-400 text-xs text-center mb-3 bg-rose-500/10 border border-rose-500/30 rounded-lg px-3 py-2">
+            {error}
+          </p>
+        )}
+
         <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
           <p className="text-slate-400 text-xs uppercase tracking-widest mb-3 text-center">
             Who are you?
           </p>
           <div className="space-y-2">
-            {ROOMMATES.map((r) => (
+            {state.roommates.map((r) => (
               <button
                 key={r.id}
                 onClick={() => onSelect(r)}
@@ -69,15 +82,24 @@ function SelectScreen({ onSelect }: { onSelect: (r: Roommate) => void }) {
             ))}
           </div>
         </div>
-        <p className="text-center text-slate-600 text-xs mt-4">Saved on this device only</p>
+        <p className="text-center text-slate-500 text-xs mt-4 flex items-center justify-center gap-1">
+          {storage === "kv" ? (
+            <>
+              <Cloud className="w-3 h-3" /> Synced across all devices
+            </>
+          ) : (
+            <>
+              <CloudOff className="w-3 h-3" /> Shared on this server (local dev)
+            </>
+          )}
+        </p>
       </div>
     </div>
   );
 }
 
-// ─── dashboard ───────────────────────────────────────────────────────────────
-
 function Dashboard({ user }: { user: Roommate }) {
+  const { state, addTurn, setAttendance, runMidnightCalc } = useAppState();
   const [scores, setScores] = useState<Score[]>([]);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [myStatus, setMyStatus] = useState<"present" | "away">("present");
@@ -86,57 +108,51 @@ function Dashboard({ user }: { user: Roommate }) {
   const date = today();
 
   const refresh = useCallback(() => {
-    setScores(getScores(date));
-    setTurns(getTurnsForDate(date));
-    setMyStatus(getAttendanceStatus(date, user.id));
-  }, [date, user.id]);
+    setScores(getScores(state, date));
+    setTurns(getTurnsForDate(state, date));
+    setMyStatus(getAttendanceStatus(state, date, user.id));
+  }, [state, date, user.id]);
 
   useEffect(() => {
     refresh();
-    // Schedule midnight calc
     const now = new Date();
     const midnight = new Date(now);
     midnight.setHours(24, 0, 5, 0);
     const timer = setTimeout(() => {
-      runMidnightCalc(date);
-      refresh();
+      runMidnightCalc(date).then(refresh);
     }, midnight.getTime() - now.getTime());
     return () => clearTimeout(timer);
-  }, [refresh, date]);
+  }, [refresh, date, runMidnightCalc]);
 
-  const handleAttendance = (status: "present" | "away") => {
-    setAttendance(date, user.id, status);
+  const handleAttendance = async (status: "present" | "away") => {
+    await setAttendance(date, user.id, status);
     setMyStatus(status);
-    setScores(getScores(date));
   };
 
-  const handleMark = () => {
+  const handleMark = async () => {
     if (marking || myStatus === "away") return;
     setMarking(true);
-    setTimeout(() => {
-      addTurn(user.id);
-      refresh();
-      setJustMarked(true);
-      setMarking(false);
-      setTimeout(() => setJustMarked(false), 2000);
-    }, 300);
+    await new Promise((r) => setTimeout(r, 300));
+    await addTurn(user.id);
+    refresh();
+    setJustMarked(true);
+    setMarking(false);
+    setTimeout(() => setJustMarked(false), 2000);
   };
 
   const suggested = getSuggestedNext(scores);
   const myTurns = turns.filter((t) => t.roommateId === user.id).length;
-  const myPending = getMissedCarry(date)[user.id] ?? 0;
+  const myPending = getMissedCarry(state, date)[user.id] ?? 0;
   const presentCount = scores.filter((s) => s.isPresent).length;
   const maxTurns = Math.max(...scores.map((s) => s.turns), 1);
 
   return (
     <div className="space-y-4 pb-6">
-      {/* Date */}
       <div>
         <h2 className="text-lg font-bold text-white">{fmtDate(date)}</h2>
         <p className="text-slate-500 text-xs">{presentCount} roommates present today</p>
       </div>
 
-      {/* Status toggle */}
       <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
         <p className="text-slate-400 text-xs uppercase tracking-widest mb-3">Your Status</p>
         <div className="flex gap-2">
@@ -160,7 +176,6 @@ function Dashboard({ user }: { user: Roommate }) {
         </div>
       </div>
 
-      {/* Mark turn button */}
       <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
         <div className="flex items-end justify-between mb-4">
           <div>
@@ -204,7 +219,6 @@ function Dashboard({ user }: { user: Roommate }) {
         </button>
       </div>
 
-      {/* Suggested next */}
       {suggested && (
         <div
           className={clx(
@@ -240,7 +254,6 @@ function Dashboard({ user }: { user: Roommate }) {
         </div>
       )}
 
-      {/* Leaderboard */}
       <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
         <p className="text-slate-400 text-xs uppercase tracking-widest mb-3">Today's Board</p>
         <div className="space-y-3">
@@ -280,17 +293,16 @@ function Dashboard({ user }: { user: Roommate }) {
         </div>
       </div>
 
-      {/* Recent activity */}
       {turns.length > 0 && (
         <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
           <p className="text-slate-400 text-xs uppercase tracking-widest mb-3">Recent</p>
           <div className="space-y-2">
             {[...turns].reverse().slice(0, 6).map((t) => {
-              const r = ROOMMATES.find((x) => x.id === t.roommateId);
+              const r = findRoommate(state, t.roommateId);
               return (
                 <div key={t.id} className="flex items-center gap-3">
-                  <span className="text-base">{r?.emoji}</span>
-                  <span className="text-white text-sm flex-1">{r?.name} filled water</span>
+                  <span className="text-base">{r?.emoji ?? "💧"}</span>
+                  <span className="text-white text-sm flex-1">{r?.name ?? "Removed"} filled water</span>
                   <span className="text-slate-500 text-xs">{fmt(t.timestamp)}</span>
                 </div>
               );
@@ -302,13 +314,12 @@ function Dashboard({ user }: { user: Roommate }) {
   );
 }
 
-// ─── history ─────────────────────────────────────────────────────────────────
-
 function History() {
+  const { state } = useAppState();
   const [date, setDate] = useState(today);
 
-  const turns = getTurnsForDate(date);
-  const scores = getScores(date);
+  const turns = getTurnsForDate(state, date);
+  const scores = getScores(state, date);
 
   const move = (dir: number) => {
     const d = new Date(date + "T12:00:00");
@@ -319,7 +330,6 @@ function History() {
 
   return (
     <div className="space-y-4 pb-6">
-      {/* Date nav */}
       <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
         <div className="flex items-center justify-between">
           <button onClick={() => move(-1)} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors">
@@ -339,7 +349,6 @@ function History() {
         </div>
       </div>
 
-      {/* Summary row */}
       <div className="grid grid-cols-3 gap-3">
         {[
           { label: "Total Fills", value: turns.length, color: "text-sky-400" },
@@ -357,7 +366,6 @@ function History() {
         ))}
       </div>
 
-      {/* Per-person */}
       <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
         <p className="text-slate-400 text-xs uppercase tracking-widest mb-3">Breakdown</p>
         <div className="space-y-3">
@@ -382,23 +390,22 @@ function History() {
         </div>
       </div>
 
-      {/* Timeline */}
       {turns.length > 0 ? (
         <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
           <p className="text-slate-400 text-xs uppercase tracking-widest mb-3">Timeline</p>
           <div className="space-y-2">
             {turns.map((t, i) => {
-              const r = ROOMMATES.find((x) => x.id === t.roommateId);
+              const r = findRoommate(state, t.roommateId);
               return (
                 <div key={t.id} className="flex items-center gap-3">
                   <span className="text-slate-600 text-xs w-5 text-center">{i + 1}</span>
                   <span
                     className="w-8 h-8 rounded-xl flex items-center justify-center text-sm"
-                    style={{ background: r?.color + "25", border: `1px solid ${r?.color}40` }}
+                    style={{ background: (r?.color ?? "#64748b") + "25", border: `1px solid ${(r?.color ?? "#64748b")}40` }}
                   >
-                    {r?.emoji}
+                    {r?.emoji ?? "💧"}
                   </span>
-                  <span className="text-white text-sm flex-1">{r?.name}</span>
+                  <span className="text-white text-sm flex-1">{r?.name ?? "Removed"}</span>
                   <span className="text-slate-500 text-xs">{fmt(t.timestamp)}</span>
                 </div>
               );
@@ -415,19 +422,29 @@ function History() {
   );
 }
 
-// ─── shell ────────────────────────────────────────────────────────────────────
-
 export default function App() {
+  const { state, loading, error, saving } = useAppState();
   const [user, setUser] = useState<Roommate | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const [view, setView] = useState<"dash" | "history">("dash");
+  const [userLoaded, setUserLoaded] = useState(false);
+  const [view, setView] = useState<"dash" | "history" | "users">("dash");
 
   useEffect(() => {
-    setUser(getSavedUser());
-    setLoaded(true);
-  }, []);
+    setUser(getSavedUser(state.roommates));
+    setUserLoaded(true);
+  }, [state.roommates]);
 
-  if (!loaded) {
+  useEffect(() => {
+    if (!user) return;
+    const still = state.roommates.find((r) => r.id === user.id);
+    if (!still) {
+      saveUserId(null);
+      setUser(null);
+    } else if (still.name !== user.name || still.emoji !== user.emoji || still.color !== user.color) {
+      setUser(still);
+    }
+  }, [state.roommates, user]);
+
+  if (loading || !userLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Droplets className="w-8 h-8 text-sky-500 animate-pulse" />
@@ -439,7 +456,7 @@ export default function App() {
     return (
       <SelectScreen
         onSelect={(r) => {
-          saveUser(r);
+          saveUserId(r.id);
           setUser(r);
         }}
       />
@@ -448,39 +465,47 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col max-w-md mx-auto">
-      {/* Header */}
       <header className="sticky top-0 z-10 bg-slate-950/90 backdrop-blur border-b border-slate-800 px-4 h-14 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Droplets className="w-5 h-5 text-sky-400" />
           <span className="font-bold text-white text-sm">AquaShift</span>
+          {saving && <RefreshCw className="w-3 h-3 text-slate-500 animate-spin" />}
         </div>
         <div className="flex items-center gap-2">
           <span
-            className="px-3 py-1 rounded-full text-xs font-medium"
+            className="px-3 py-1 rounded-full text-xs font-medium max-w-[120px] truncate"
             style={{ background: user.color + "25", color: user.color }}
           >
             {user.emoji} {user.name}
           </span>
           <button
-            onClick={() => { saveUser(null); setUser(null); }}
+            onClick={() => { saveUserId(null); setUser(null); }}
             className="p-1.5 text-slate-500 hover:text-white rounded-lg transition-colors"
+            title="Switch user"
           >
             <LogOut className="w-4 h-4" />
           </button>
         </div>
       </header>
 
-      {/* Content */}
+      {error && (
+        <p className="text-center text-rose-400 text-xs py-2 px-4 bg-rose-500/10 border-b border-rose-500/20">
+          {error}
+        </p>
+      )}
+
       <main className="flex-1 px-4 pt-5 overflow-y-auto">
-        {view === "dash" ? <Dashboard user={user} /> : <History />}
+        {view === "dash" && <Dashboard user={user} />}
+        {view === "history" && <History />}
+        {view === "users" && <ManageUsers />}
       </main>
 
-      {/* Bottom nav */}
       <nav className="sticky bottom-0 bg-slate-950/90 backdrop-blur border-t border-slate-800 flex h-16">
         {([
-          { id: "dash", label: "Dashboard", Icon: LayoutDashboard },
-          { id: "history", label: "History", Icon: Calendar },
-        ] as const).map(({ id, label, Icon }) => (
+          { id: "dash" as const, label: "Dashboard", Icon: LayoutDashboard },
+          { id: "history" as const, label: "History", Icon: Calendar },
+          { id: "users" as const, label: "People", Icon: Users },
+        ]).map(({ id, label, Icon }) => (
           <button
             key={id}
             onClick={() => setView(id)}

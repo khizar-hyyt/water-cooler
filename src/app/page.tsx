@@ -1,5 +1,10 @@
 import App from "@/components/App";
+import { AppStateProvider } from "@/lib/AppStateContext";
 
 export default function Home() {
-  return <App />;
+  return (
+    <AppStateProvider>
+      <App />
+    </AppStateProvider>
+  );
 }

@@ -1,44 +1,42 @@
 # 💧 AquaShift – Water Cooler Duty Tracker
 
-Track who fills the water cooler fairly among roommates. No backend, no signup, no config — just deploy and share the link.
+Track who fills the water cooler fairly among roommates. Deploy once, share the link — everyone sees the same data on every phone and computer.
 
 ## How it works
 
-- Everyone opens the app on their phone and taps their name
+- Everyone opens the shared app link and taps their name
 - Whoever fills the cooler taps **"Mark My Turn Complete"**
 - The app tracks turns, suggests who should go next, and carries missed duties to the next day
 - Mark yourself **Away** to be excluded from fairness calculations that day
+- Open **People** in the bottom nav to add roommates, rename them, or remove them
 
-> ⚠️ Data is stored in each person's browser (localStorage). For a shared view, open the app on one shared device/tablet, or use it individually and just track your own turns.
+Data is stored on the server (not in each browser), so all devices stay in sync.
 
-## Customize roommates
+## Manage roommates
 
-Edit **`src/lib/store.ts`** and change the `ROOMMATES` array:
+Use the **People** tab to:
 
-```ts
-export const ROOMMATES = [
-  { id: "r1", name: "Ahmed",  emoji: "🧑", color: "#38bdf8" },
-  { id: "r2", name: "Hassan", emoji: "👨", color: "#34d399" },
-  // add or remove entries...
-];
-```
+- **Add** a roommate (name, emoji, color)
+- **Edit** a name (pencil icon)
+- **Remove** someone (trash icon; past turns stay in history)
 
-Don't change existing `id` values after people have started using the app.
+No need to edit code anymore.
 
-## Deploy to Vercel (2 steps)
+## Deploy to Vercel
 
-**1. Push to GitHub**
-```bash
-git init && git add . && git commit -m "init"
-# create a repo on github.com, then:
-git remote add origin https://github.com/YOUR_NAME/aquashift.git
-git push -u origin main
-```
+**1. Push to GitHub** (if you have not already)
 
-**2. Deploy on Vercel**
-- Go to [vercel.com](https://vercel.com) → New Project → Import your repo
-- Click **Deploy** — no environment variables needed!
-- Share the URL with your roommates
+**2. Import on [vercel.com](https://vercel.com)** and deploy
+
+**3. Enable shared storage (required for production)**
+
+On Vercel, data must live in **Vercel KV** (otherwise each server instance would not share state):
+
+1. Open your project on Vercel → **Storage** → **Create Database** → **KV**
+2. Connect it to the project — Vercel adds `KV_REST_API_URL` and `KV_REST_API_TOKEN` automatically
+3. **Redeploy** the app
+
+Without KV, `npm run dev` still works locally (data is saved in `.data/state.json` on your machine).
 
 ## Run locally
 
@@ -48,9 +46,11 @@ npm run dev
 # open http://localhost:3000
 ```
 
+Local dev uses a `.data/state.json` file so you can test without Vercel KV. Only that computer sees that file until you deploy with KV.
+
 ## Stack
 
 - Next.js 14 (App Router)
 - React + TypeScript
 - Tailwind CSS
-- localStorage (no database needed)
+- Vercel KV (production) / local JSON file (development)

@@ -1,139 +1,110 @@
-// All data lives in localStorage — no backend, no signup, no setup.
-// Each roommate's browser shares nothing with others, so one person
-// should be the "source of truth" device, OR everyone logs their own
-// turns from their own phone (the turn list merges by timestamp on load).
+import type { AppState, DayData, Roommate, Turn } from "./types";
 
-export const ROOMMATES = [
-  { id: "r1", name: "Ahmed",  emoji: "🧑", color: "#38bdf8" },
-  { id: "r2", name: "Hassan", emoji: "👨", color: "#34d399" },
-  { id: "r3", name: "Usman",  emoji: "🧔", color: "#a78bfa" },
-  { id: "r4", name: "Bilal",  emoji: "👦", color: "#fbbf24" },
-  { id: "r5", name: "Zain",   emoji: "🙋", color: "#f87171" },
-];
-
-export type Roommate = typeof ROOMMATES[number];
-
-export interface Turn {
-  id: string;
-  roommateId: string;
-  timestamp: number; // Date.now()
-  date: string;      // "YYYY-MM-DD"
-}
-
-export interface DayData {
-  date: string;
-  attendance: Record<string, "present" | "away">; // roommateId → status
-  missedCarry: Record<string, number>;             // roommateId → fractional missed turns
-}
-
-// ── helpers ────────────────────────────────────────────────────────────────
+export type { AppState, DayData, Roommate, Turn } from "./types";
+export { DEFAULT_ROOMMATES, EMOJI_OPTIONS, COLOR_OPTIONS, createDefaultState } from "./types";
 
 export function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function key(k: string) {
+function lsKey(k: string) {
   return `aq_${k}`;
 }
 
-function load<T>(k: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
+export function getSavedUserId(): string | null {
+  if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(key(k));
-    return raw ? (JSON.parse(raw) as T) : fallback;
+    const raw = localStorage.getItem(lsKey("user"));
+    return raw ? (JSON.parse(raw) as string) : null;
   } catch {
-    return fallback;
+    return null;
   }
 }
 
-function save(k: string, val: unknown) {
+export function saveUserId(id: string | null) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(key(k), JSON.stringify(val));
+  localStorage.setItem(lsKey("user"), JSON.stringify(id));
 }
 
-// ── current user ───────────────────────────────────────────────────────────
-
-export function getSavedUser(): Roommate | null {
-  const id = load<string | null>("user", null);
-  return ROOMMATES.find((r) => r.id === id) ?? null;
+export function getSavedUser(roommates: Roommate[]): Roommate | null {
+  const id = getSavedUserId();
+  return roommates.find((r) => r.id === id) ?? null;
 }
 
-export function saveUser(r: Roommate | null) {
-  save("user", r?.id ?? null);
+export function getTurnsForDate(state: AppState, date: string): Turn[] {
+  return state.turns.filter((t) => t.date === date);
 }
 
-// ── turns ──────────────────────────────────────────────────────────────────
-
-export function getAllTurns(): Turn[] {
-  return load<Turn[]>("turns", []);
+export function getDayData(state: AppState, date: string): DayData {
+  return (
+    state.days[date] ?? {
+      date,
+      attendance: {},
+      missedCarry: {},
+    }
+  );
 }
 
-export function getTurnsForDate(date: string): Turn[] {
-  return getAllTurns().filter((t) => t.date === date);
+export function setDayData(state: AppState, date: string, data: DayData): AppState {
+  return {
+    ...state,
+    days: { ...state.days, [date]: data },
+  };
 }
 
-export function addTurn(roommateId: string): Turn {
+export function addTurnToState(state: AppState, roommateId: string): AppState {
   const turn: Turn = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     roommateId,
     timestamp: Date.now(),
     date: today(),
   };
-  const all = getAllTurns();
-  save("turns", [...all, turn]);
-  return turn;
+  return { ...state, turns: [...state.turns, turn] };
 }
 
-// ── day data (attendance + carry) ─────────────────────────────────────────
-
-export function getDayData(date: string): DayData {
-  return load<DayData>(`day_${date}`, {
-    date,
-    attendance: {},
-    missedCarry: {},
+export function setAttendanceInState(
+  state: AppState,
+  date: string,
+  roommateId: string,
+  status: "present" | "away"
+): AppState {
+  const d = getDayData(state, date);
+  return setDayData(state, date, {
+    ...d,
+    attendance: { ...d.attendance, [roommateId]: status },
   });
 }
 
-export function setAttendance(date: string, roommateId: string, status: "present" | "away") {
-  const d = getDayData(date);
-  d.attendance[roommateId] = status;
-  save(`day_${date}`, d);
+export function getAttendanceStatus(state: AppState, date: string, roommateId: string): "present" | "away" {
+  return getDayData(state, date).attendance[roommateId] ?? "present";
 }
 
-export function getAttendanceStatus(date: string, roommateId: string): "present" | "away" {
-  return getDayData(date).attendance[roommateId] ?? "present";
+export function getMissedCarry(state: AppState, date: string): Record<string, number> {
+  return getDayData(state, date).missedCarry;
 }
 
-// ── missed carry ───────────────────────────────────────────────────────────
+export function runMidnightCalcOnState(state: AppState, date: string): AppState {
+  if (state.midnightRan.includes(date)) return state;
 
-export function getMissedCarry(date: string): Record<string, number> {
-  return getDayData(date).missedCarry;
-}
-
-export function runMidnightCalc(date: string) {
-  // Only run once per date
-  const alreadyRan = load<boolean>(`midnight_${date}`, false);
-  if (alreadyRan) return;
-
-  const turns = getTurnsForDate(date);
-  const day = getDayData(date);
-  const presentIds = ROOMMATES
+  const turns = getTurnsForDate(state, date);
+  const day = getDayData(state, date);
+  const presentIds = state.roommates
     .filter((r) => (day.attendance[r.id] ?? "present") === "present")
     .map((r) => r.id);
 
+  let next = state;
+
   if (presentIds.length === 0 || turns.length === 0) {
-    save(`midnight_${date}`, true);
-    return;
+    return { ...next, midnightRan: [...next.midnightRan, date] };
   }
 
   const fairShare = turns.length / presentIds.length;
   const newCarry: Record<string, number> = {};
 
-  // Carry forward from yesterday
   const yesterday = new Date(date);
   yesterday.setDate(yesterday.getDate() - 1);
   const yDate = yesterday.toISOString().slice(0, 10);
-  const prevCarry = getMissedCarry(yDate);
+  const prevCarry = getMissedCarry(state, yDate);
 
   presentIds.forEach((id) => {
     const myTurns = turns.filter((t) => t.roommateId === id).length;
@@ -146,33 +117,28 @@ export function runMidnightCalc(date: string) {
   const tomorrow = new Date(date);
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tDate = tomorrow.toISOString().slice(0, 10);
-  const tomorrowData = getDayData(tDate);
-  tomorrowData.missedCarry = newCarry;
-  save(`day_${tDate}`, tomorrowData);
-  save(`midnight_${date}`, true);
+  const tomorrowData = getDayData(state, tDate);
+  next = setDayData(next, tDate, { ...tomorrowData, missedCarry: newCarry });
+  return { ...next, midnightRan: [...next.midnightRan, date] };
 }
-
-// ── fairness scores ────────────────────────────────────────────────────────
 
 export interface Score {
   roommate: Roommate;
   turns: number;
   pending: number;
-  priority: number; // lower → should go next
+  priority: number;
   isPresent: boolean;
 }
 
-export function getScores(date: string): Score[] {
-  const turns = getTurnsForDate(date);
-  const carry = getMissedCarry(date);
-  const day = getDayData(date);
+export function getScores(state: AppState, date: string): Score[] {
+  const turns = getTurnsForDate(state, date);
+  const carry = getMissedCarry(state, date);
+  const day = getDayData(state, date);
 
-  return ROOMMATES.map((r) => {
+  return state.roommates.map((r) => {
     const myTurns = turns.filter((t) => t.roommateId === r.id).length;
     const pending = carry[r.id] ?? 0;
     const isPresent = (day.attendance[r.id] ?? "present") === "present";
-    // Lower priority score = should go next.
-    // Pending duties push priority down (= higher urgency).
     const priority = isPresent ? myTurns - pending * 2 : Infinity;
     return { roommate: r, turns: myTurns, pending, priority, isPresent };
   });
@@ -182,4 +148,77 @@ export function getSuggestedNext(scores: Score[]): Score | null {
   const present = scores.filter((s) => s.isPresent);
   if (!present.length) return null;
   return present.reduce((a, b) => (b.priority < a.priority ? b : a));
+}
+
+export function findRoommate(state: AppState, id: string): Roommate | undefined {
+  return state.roommates.find((r) => r.id === id);
+}
+
+export function addRoommateToState(state: AppState, name: string, emoji: string, color: string): AppState {
+  const id = `r_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  const roommate: Roommate = {
+    id,
+    name: name.trim() || "New roommate",
+    emoji,
+    color,
+  };
+  return { ...state, roommates: [...state.roommates, roommate] };
+}
+
+export function updateRoommateInState(
+  state: AppState,
+  id: string,
+  patch: Partial<Pick<Roommate, "name" | "emoji" | "color">>
+): AppState {
+  return {
+    ...state,
+    roommates: state.roommates.map((r) => (r.id === id ? { ...r, ...patch, name: patch.name?.trim() || r.name } : r)),
+  };
+}
+
+export function removeRoommateFromState(state: AppState, id: string): AppState {
+  if (state.roommates.length <= 1) return state;
+  return { ...state, roommates: state.roommates.filter((r) => r.id !== id) };
+}
+
+// ── one-time migration from old localStorage-only data ─────────────────────
+
+export function collectLegacyLocalState(): Partial<AppState> | null {
+  if (typeof window === "undefined") return null;
+  if (localStorage.getItem(lsKey("migrated"))) return null;
+
+  const turnsRaw = localStorage.getItem(lsKey("turns"));
+  const turns: Turn[] = turnsRaw ? JSON.parse(turnsRaw) : [];
+  const days: Record<string, DayData> = {};
+  const midnightRan: string[] = [];
+
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k?.startsWith("aq_")) continue;
+    const suffix = k.slice(3);
+    if (suffix.startsWith("day_")) {
+      const date = suffix.slice(4);
+      try {
+        days[date] = JSON.parse(localStorage.getItem(k)!);
+      } catch {
+        /* skip */
+      }
+    }
+    if (suffix.startsWith("midnight_")) {
+      const date = suffix.slice(9);
+      try {
+        if (JSON.parse(localStorage.getItem(k)!)) midnightRan.push(date);
+      } catch {
+        /* skip */
+      }
+    }
+  }
+
+  if (turns.length === 0 && Object.keys(days).length === 0) return null;
+  return { turns, days, midnightRan };
+}
+
+export function markLegacyMigrated() {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(lsKey("migrated"), "1");
 }
