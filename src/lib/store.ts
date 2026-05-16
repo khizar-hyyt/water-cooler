@@ -3,8 +3,23 @@ import type { AppState, DayData, Roommate, Turn } from "./types";
 export type { AppState, DayData, Roommate, Turn } from "./types";
 export { DEFAULT_ROOMMATES, EMOJI_OPTIONS, COLOR_OPTIONS, createDefaultState } from "./types";
 
+/** YYYY-MM-DD in the user's local timezone (not UTC). */
+export function formatLocalDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return formatLocalDate(new Date());
+}
+
+/** Add days to a YYYY-MM-DD string (local calendar). */
+export function addDays(dateStr: string, delta: number): string {
+  const d = new Date(dateStr + "T12:00:00");
+  d.setDate(d.getDate() + delta);
+  return formatLocalDate(d);
 }
 
 function lsKey(k: string) {
@@ -101,9 +116,7 @@ export function runMidnightCalcOnState(state: AppState, date: string): AppState 
   const fairShare = turns.length / presentIds.length;
   const newCarry: Record<string, number> = {};
 
-  const yesterday = new Date(date);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yDate = yesterday.toISOString().slice(0, 10);
+  const yDate = addDays(date, -1);
   const prevCarry = getMissedCarry(state, yDate);
 
   presentIds.forEach((id) => {
@@ -114,9 +127,7 @@ export function runMidnightCalcOnState(state: AppState, date: string): AppState 
     if (total > 0.05) newCarry[id] = Math.round(total * 10) / 10;
   });
 
-  const tomorrow = new Date(date);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tDate = tomorrow.toISOString().slice(0, 10);
+  const tDate = addDays(date, 1);
   const tomorrowData = getDayData(state, tDate);
   next = setDayData(next, tDate, { ...tomorrowData, missedCarry: newCarry });
   return { ...next, midnightRan: [...next.midnightRan, date] };

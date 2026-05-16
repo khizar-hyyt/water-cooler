@@ -6,7 +6,7 @@ import {
   getSavedUser, saveUserId,
   getAttendanceStatus, getTurnsForDate,
   getScores, getSuggestedNext, getMissedCarry,
-  findRoommate, today,
+  findRoommate, today, addDays,
 } from "@/lib/store";
 import { useAppState } from "@/lib/AppStateContext";
 import ManageUsers from "@/components/ManageUsers";
@@ -322,9 +322,7 @@ function History() {
   const scores = getScores(state, date);
 
   const move = (dir: number) => {
-    const d = new Date(date + "T12:00:00");
-    d.setDate(d.getDate() + dir);
-    const next = d.toISOString().slice(0, 10);
+    const next = addDays(date, dir);
     if (next <= today()) setDate(next);
   };
 

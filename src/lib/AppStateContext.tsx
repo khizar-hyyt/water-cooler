@@ -122,9 +122,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
             ...remote,
             turns: [...remote.turns, ...(legacy.turns ?? [])].sort((a, b) => a.timestamp - b.timestamp),
             days: { ...remote.days, ...(legacy.days ?? {}) },
-            midnightRan: Array.from(
-              new Set([...remote.midnightRan, ...(legacy.midnightRan ?? [])])
-            ),
+            midnightRan: [
+              ...remote.midnightRan,
+              ...(legacy.midnightRan ?? []),
+            ].filter((d, i, arr) => arr.indexOf(d) === i),
           };
           remote = await persistState(merged);
           markLegacyMigrated();
