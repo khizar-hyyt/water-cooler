@@ -3,6 +3,8 @@ import type { AppState } from "./types";
 import {
   addRoommateToState,
   addTurnToState,
+  ensureMidnightCaughtUp,
+  removeLastTurnFromState,
   removeRoommateFromState,
   recalculateBalancesFromDate,
   resetDayInState,
@@ -24,7 +26,8 @@ export type MutateAction =
   | { type: "resetDay"; date: string }
   | { type: "setTurnCount"; date: string; roommateId: string; count: number }
   | { type: "recalculateFromDate"; fromDate: string }
-  | { type: "setBalance"; date: string; roommateId: string; balance: number };
+  | { type: "setBalance"; date: string; roommateId: string; balance: number }
+  | { type: "removeLastTurn"; roommateId: string; date: string };
 
 export function authorizeMutation(
   session: SessionPayload | null,
@@ -36,11 +39,15 @@ export function authorizeMutation(
 
   switch (action.type) {
     case "addTurn":
+    case "removeLastTurn":
       return action.roommateId === session.roommateId ? null : "You can only log your own turns";
     case "setAttendance":
       return action.roommateId === session.roommateId ? null : "Only admin can change others' status";
     case "addRoommate":
     case "updateRoommate":
+      if (session.role === "admin") return null;
+      if (action.id !== session.roommateId) return "You can only edit your own profile";
+      return null;
     case "removeRoommate":
       return "Admin only";
     case "runMidnightCalc":
@@ -55,38 +62,54 @@ export function authorizeMutation(
   }
 }
 
+function finishMutation(state: AppState, action: MutateAction): AppState {
+  return action.type === "recalculateFromDate" ? state : ensureMidnightCaughtUp(state);
+}
+
 export function applyMutation(state: AppState, action: MutateAction): AppState {
+  let next: AppState;
   switch (action.type) {
     case "addTurn":
-      return addTurnToState(state, action.roommateId, action.date);
+      next = addTurnToState(state, action.roommateId, action.date);
+      break;
     case "setAttendance": {
-      let next = setAttendanceInState(state, action.date, action.roommateId, action.status);
+      next = setAttendanceInState(state, action.date, action.roommateId, action.status);
       if (action.date < today()) next = recalculateBalancesFromDate(next, action.date);
-      return next;
+      break;
     }
     case "addRoommate":
-      return addRoommateToState(state, action.name, action.emoji, action.color);
+      next = addRoommateToState(state, action.name, action.emoji, action.color);
+      break;
     case "updateRoommate":
-      return updateRoommateInState(state, action.id, action.patch);
+      next = updateRoommateInState(state, action.id, action.patch);
+      break;
     case "removeRoommate":
-      return removeRoommateFromState(state, action.id);
+      next = removeRoommateFromState(state, action.id);
+      break;
     case "runMidnightCalc":
-      return runMidnightCalcOnState(state, action.date);
+      next = runMidnightCalcOnState(state, action.date);
+      break;
     case "resetDay":
-      return resetDayInState(state, action.date);
+      next = resetDayInState(state, action.date);
+      break;
     case "setTurnCount": {
-      let next = setRoommateTurnCountInState(state, action.date, action.roommateId, action.count);
+      next = setRoommateTurnCountInState(state, action.date, action.roommateId, action.count);
       if (action.date < today()) next = recalculateBalancesFromDate(next, action.date);
-      return next;
+      break;
     }
     case "recalculateFromDate":
-      return recalculateBalancesFromDate(state, action.fromDate);
+      next = recalculateBalancesFromDate(state, action.fromDate);
+      return ensureMidnightCaughtUp(next);
     case "setBalance": {
-      let next = setRoommateBalanceInState(state, action.date, action.roommateId, action.balance);
+      next = setRoommateBalanceInState(state, action.date, action.roommateId, action.balance);
       if (action.date < today()) next = recalculateBalancesFromDate(next, action.date);
-      return next;
+      break;
     }
+    case "removeLastTurn":
+      next = removeLastTurnFromState(state, action.roommateId, action.date);
+      break;
     default:
       return state;
   }
+  return finishMutation(next, action);
 }

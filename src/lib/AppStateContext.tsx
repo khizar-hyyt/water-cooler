@@ -39,6 +39,7 @@ interface AppStateContextValue {
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   mutate: (action: MutateAction) => Promise<void>;
   addTurn: (roommateId: string, date?: string) => Promise<void>;
+  removeLastTurn: (roommateId: string, date?: string) => Promise<void>;
   setAttendance: (date: string, roommateId: string, status: "present" | "away") => Promise<void>;
   runMidnightCalc: (date: string) => Promise<void>;
   resetDay: (date: string) => Promise<void>;
@@ -119,6 +120,22 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setStorage(mode);
     setPersistent(ok);
     setError(null);
+
+    const sess = sessionRef.current;
+    if (sess?.roommate) {
+      const updated = remote.roommates.find((r) => r.id === sess.roommate!.id);
+      if (
+        updated &&
+        (updated.name !== sess.roommate.name ||
+          updated.emoji !== sess.roommate.emoji ||
+          updated.color !== sess.roommate.color)
+      ) {
+        const nextSession = { ...sess, roommate: updated };
+        saveSession(nextSession);
+        setSession(nextSession);
+      }
+    }
+
     return remote;
   }, []);
 
@@ -142,6 +159,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     try {
       const saved = await postMutate(tok, action);
       setState(saved);
+      if (action.type === "updateRoommate" && sessionRef.current?.roommate?.id === action.id) {
+        const updated = saved.roommates.find((r) => r.id === action.id);
+        if (updated) {
+          const nextSession = { ...sessionRef.current, roommate: updated };
+          saveSession(nextSession);
+          setSession(nextSession);
+        }
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not save";
       setError(msg);
@@ -274,6 +299,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     changePassword,
     mutate,
     addTurn: (roommateId, date = today()) => mutate({ type: "addTurn", roommateId, date }),
+    removeLastTurn: (roommateId, date = today()) =>
+      mutate({ type: "removeLastTurn", roommateId, date }),
     setAttendance: (date, roommateId, status) =>
       mutate({ type: "setAttendance", date, roommateId, status }),
     runMidnightCalc: (date) => mutate({ type: "runMidnightCalc", date }),

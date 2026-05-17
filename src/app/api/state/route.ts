@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getBearerToken, verifySessionToken } from "@/lib/auth";
-import { getServerState, isPersistentStorage, setServerState, storageMode } from "@/lib/server-state";
+import { ensureMidnightCaughtUp } from "@/lib/store";
+import { getServerState, isPersistentStorage, saveServerState, setServerState, storageMode } from "@/lib/server-state";
 import { normalizeState, type AppState } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +10,15 @@ export const fetchCache = "force-no-store";
 
 export async function GET() {
   try {
-    const state = normalizeState(await getServerState());
+    const raw = normalizeState(await getServerState());
+    const maintained = ensureMidnightCaughtUp(raw);
+    const state =
+      JSON.stringify(maintained) !== JSON.stringify(raw)
+        ? await saveServerState({
+            ...maintained,
+            revision: (raw.revision ?? 0) + 1,
+          })
+        : raw;
     return NextResponse.json(
       { state, storage: storageMode(), persistent: isPersistentStorage() },
       { headers: { "Cache-Control": "no-store, max-age=0" } }

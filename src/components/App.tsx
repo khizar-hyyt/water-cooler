@@ -180,10 +180,11 @@ function RecentTimeline({ items, state }: { items: TimelineItem[]; state: Return
 }
 
 function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
-  const { state, addTurn, setAttendance, runMidnightCalc, resetDay, setTurnCount, setBalance, saving } =
+  const { state, addTurn, removeLastTurn, setAttendance, runMidnightCalc, resetDay, setTurnCount, setBalance, saving } =
     useAppState();
   const [justMarked, setJustMarked] = useState(false);
   const [marking, setMarking] = useState(false);
+  const [undoing, setUndoing] = useState(false);
   const [resetting, setResetting] = useState(false);
   const date = today();
 
@@ -216,6 +217,17 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
     setJustMarked(true);
     setMarking(false);
     setTimeout(() => setJustMarked(false), 2000);
+  };
+
+  const handleUndoLast = async () => {
+    if (undoing || myTurns <= 0 || myStatus === "away") return;
+    if (!confirm("Remove your most recent fill for today?")) return;
+    setUndoing(true);
+    try {
+      await removeLastTurn(user.id, date);
+    } finally {
+      setUndoing(false);
+    }
   };
 
   const suggested = getSuggestedNext(scores);
@@ -355,6 +367,16 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
             </span>
           )}
         </button>
+        {myTurns > 0 && myStatus === "present" && (
+          <button
+            type="button"
+            onClick={handleUndoLast}
+            disabled={undoing || saving}
+            className="w-full mt-2 py-2 rounded-xl text-xs font-semibold text-rose-300 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20 disabled:opacity-50"
+          >
+            {undoing ? "Removing…" : "Undo last fill"}
+          </button>
+        )}
       </div>
       </>
       )}

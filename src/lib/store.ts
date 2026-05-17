@@ -77,6 +77,18 @@ export function addTurnToState(state: AppState, roommateId: string, date: string
   return { ...state, turns: [...state.turns, turn] };
 }
 
+/** Remove this person's most recent fill for the day (undo mistaken mark). */
+export function removeLastTurnFromState(
+  state: AppState,
+  roommateId: string,
+  date: string
+): AppState {
+  const mine = getTurnsForDate(state, date).filter((t) => t.roommateId === roommateId);
+  if (!mine.length) return state;
+  const last = mine.reduce((a, b) => (b.timestamp > a.timestamp ? b : a));
+  return { ...state, turns: state.turns.filter((t) => t.id !== last.id) };
+}
+
 export function setAttendanceInState(
   state: AppState,
   date: string,
@@ -134,31 +146,35 @@ export function computeBalance(
   return base + owedToday - creditToday;
 }
 
-export function runMidnightCalcOnState(
-  state: AppState,
-  date: string,
-  options?: { force?: boolean }
-): AppState {
-  if (!options?.force && state.midnightRan.includes(date)) return state;
+function rollCarryToNextDay(state: AppState, date: string, newCarry: Record<string, number>): AppState {
+  const tDate = addDays(date, 1);
+  const tomorrowData = getDayData(state, tDate);
+  return setDayData(state, tDate, { ...tomorrowData, missedCarry: newCarry });
+}
 
+function closingCarryForDay(state: AppState, date: string): Record<string, number> {
   const turns = getTurnsForDate(state, date);
   const day = getDayData(state, date);
+  const prevCarry = getMissedCarry(state, date);
   const presentIds = state.roommates
     .filter((r) => (day.attendance[r.id] ?? "present") === "present")
     .map((r) => r.id);
 
-  let next = state;
+  const newCarry: Record<string, number> = {};
 
-  if (presentIds.length === 0 || turns.length === 0) {
-    return { ...next, midnightRan: [...next.midnightRan, date] };
+  if (turns.length === 0 || presentIds.length === 0) {
+    state.roommates.forEach((r) => {
+      const prev = intBalance(prevCarry[r.id] ?? 0);
+      if (prev !== 0) newCarry[r.id] = prev;
+    });
+    return newCarry;
   }
 
-  const counts = presentIds.map((id) => turns.filter((t) => t.roommateId === id).length);
-  const totalAmongPresent = counts.reduce((sum, n) => sum + n, 0);
+  const totalAmongPresent = presentIds.reduce(
+    (sum, id) => sum + turns.filter((t) => t.roommateId === id).length,
+    0
+  );
   const presentCount = presentIds.length;
-
-  const prevCarry = getMissedCarry(state, date);
-  const newCarry: Record<string, number> = {};
 
   presentIds.forEach((id) => {
     const myTurns = turns.filter((t) => t.roommateId === id).length;
@@ -178,10 +194,72 @@ export function runMidnightCalcOnState(
     if (prev !== 0) newCarry[r.id] = prev;
   });
 
-  const tDate = addDays(date, 1);
-  const tomorrowData = getDayData(state, tDate);
-  next = setDayData(next, tDate, { ...tomorrowData, missedCarry: newCarry });
-  return { ...next, midnightRan: [...next.midnightRan, date] };
+  return newCarry;
+}
+
+export function runMidnightCalcOnState(
+  state: AppState,
+  date: string,
+  options?: { force?: boolean }
+): AppState {
+  if (!options?.force && state.midnightRan.includes(date)) return state;
+
+  const newCarry = closingCarryForDay(state, date);
+  let next = rollCarryToNextDay(state, date, newCarry);
+  const ran = next.midnightRan.includes(date)
+    ? next.midnightRan
+    : [...next.midnightRan, date];
+  return { ...next, midnightRan: ran };
+}
+
+export function firstActivityDate(state: AppState): string | null {
+  let min: string | null = null;
+  for (const t of state.turns) {
+    if (!min || t.date < min) min = t.date;
+  }
+  for (const d of Object.keys(state.days)) {
+    if (!min || d < min) min = d;
+  }
+  return min;
+}
+
+/** True when yesterday was closed out but opening carry for today is missing (old midnight bug). */
+export function needsMidnightRepair(state: AppState): boolean {
+  const end = today();
+  const y = addDays(end, -1);
+  if (!state.midnightRan.includes(y)) return false;
+
+  const closing = getScores(state, y).some((s) => s.balance !== 0);
+  if (!closing) return false;
+
+  const opening = getMissedCarry(state, end);
+  const hasOpening = Object.values(opening).some((v) => intBalance(v) !== 0);
+  return !hasOpening;
+}
+
+/** Run midnight for any past day not yet processed; repair broken carry from yesterday. */
+export function ensureMidnightCaughtUp(state: AppState): AppState {
+  const end = today();
+  const first = firstActivityDate(state);
+  if (!first) return state;
+
+  let next = state;
+  let d = first;
+  while (d < end) {
+    if (!next.midnightRan.includes(d)) {
+      next = runMidnightCalcOnState(next, d);
+    }
+    d = addDays(d, 1);
+  }
+
+  if (needsMidnightRepair(next)) {
+    const y = addDays(end, -1);
+    if (y >= first) {
+      next = runMidnightCalcOnState(next, y, { force: true });
+    }
+  }
+
+  return next;
 }
 
 /** Replay midnight from a past date through yesterday so today's owed/credit reflect edits. */

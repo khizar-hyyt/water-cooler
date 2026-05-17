@@ -11,7 +11,18 @@ export async function POST(request: Request) {
   try {
     const session = verifySessionToken(getBearerToken(request));
     const body = await request.json();
-    const action = body.action as MutateAction;
+    let action = body.action as MutateAction;
+
+    if (action?.type === "updateRoommate" && session.role !== "admin") {
+      action = {
+        type: "updateRoommate",
+        id: action.id,
+        patch: {
+          ...(action.patch.name !== undefined ? { name: action.patch.name } : {}),
+          ...(action.patch.emoji !== undefined ? { emoji: action.patch.emoji } : {}),
+        },
+      };
+    }
 
     if (!action?.type) {
       return NextResponse.json({ error: "Invalid action" }, { status: 400 });
@@ -23,8 +34,9 @@ export async function POST(request: Request) {
     }
 
     const state = normalizeState(await getServerState());
+    const applied = applyMutation(state, action);
     const next = normalizeState({
-      ...applyMutation(state, action),
+      ...applied,
       revision: (state.revision ?? 0) + 1,
     });
 
