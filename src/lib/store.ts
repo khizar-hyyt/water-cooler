@@ -253,8 +253,8 @@ export function getScores(state: AppState, date: string): Score[] {
     );
     const pending = Math.max(0, balance);
     const credit = Math.max(0, -balance);
-    // Higher priority → more behind → suggested sooner; credit lowers priority
-    const priority = isPresent ? myTurns + balance * 2 : Infinity;
+    // Lower priority value = more urgent; owed lowers it, credit raises it
+    const priority = isPresent ? myTurns - balance * 2 : Infinity;
     return { roommate: r, turns: myTurns, pending, credit, balance, priority, isPresent };
   });
 }
@@ -262,7 +262,15 @@ export function getScores(state: AppState, date: string): Score[] {
 export function getSuggestedNext(scores: Score[]): Score | null {
   const present = scores.filter((s) => s.isPresent);
   if (!present.length) return null;
-  return present.reduce((a, b) => (b.priority < a.priority ? b : a));
+
+  const owing = present.filter((s) => s.pending > 0);
+  const pool = owing.length > 0 ? owing : present.filter((s) => s.credit === 0);
+  const candidates = pool.length > 0 ? pool : present;
+
+  return candidates.reduce((a, b) => {
+    if (b.priority !== a.priority) return b.priority < a.priority ? b : a;
+    return b.turns < a.turns ? b : a;
+  });
 }
 
 export function findRoommate(state: AppState, id: string): Roommate | undefined {
