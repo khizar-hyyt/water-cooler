@@ -98,6 +98,32 @@ export function getMissedCarry(state: AppState, date: string): Record<string, nu
   return getDayData(state, date).missedCarry;
 }
 
+function roundBalance(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+/**
+ * Signed balance: positive = owes fills, negative = credit (did extra vs others who were present).
+ * Compares each person to the most fills anyone present did that day (not an unknown "fair share").
+ */
+export function computeBalance(
+  baseCarry: number,
+  myTurns: number,
+  maxAmongPresent: number,
+  minAmongPresent: number,
+  isPresent: boolean
+): number {
+  if (!isPresent || maxAmongPresent === 0) return baseCarry;
+
+  const behindToday = maxAmongPresent - myTurns;
+  const leaderSurplus =
+    maxAmongPresent > minAmongPresent && myTurns === maxAmongPresent
+      ? myTurns - minAmongPresent
+      : 0;
+
+  return roundBalance(baseCarry + behindToday - leaderSurplus);
+}
+
 export function runMidnightCalcOnState(state: AppState, date: string): AppState {
   if (state.midnightRan.includes(date)) return state;
 
@@ -113,18 +139,24 @@ export function runMidnightCalcOnState(state: AppState, date: string): AppState 
     return { ...next, midnightRan: [...next.midnightRan, date] };
   }
 
-  const fairShare = turns.length / presentIds.length;
-  const newCarry: Record<string, number> = {};
+  const counts = presentIds.map((id) => turns.filter((t) => t.roommateId === id).length);
+  const maxTurns = Math.max(...counts, 0);
+  const minTurns = Math.min(...counts);
 
-  const yDate = addDays(date, -1);
-  const prevCarry = getMissedCarry(state, yDate);
+  const prevCarry = getMissedCarry(state, date);
+  const newCarry: Record<string, number> = {};
 
   presentIds.forEach((id) => {
     const myTurns = turns.filter((t) => t.roommateId === id).length;
-    const deficit = fairShare - myTurns;
-    const carried = prevCarry[id] ?? 0;
-    const total = deficit + carried;
-    if (total > 0.05) newCarry[id] = Math.round(total * 10) / 10;
+    const balance = computeBalance(prevCarry[id] ?? 0, myTurns, maxTurns, minTurns, true);
+    if (Math.abs(balance) > 0.05) newCarry[id] = balance;
+  });
+
+  // Away: keep existing balance, unchanged by this day's fills
+  state.roommates.forEach((r) => {
+    if (presentIds.includes(r.id)) return;
+    const prev = prevCarry[r.id];
+    if (prev !== undefined && Math.abs(prev) > 0.05) newCarry[r.id] = prev;
   });
 
   const tDate = addDays(date, 1);
@@ -136,7 +168,12 @@ export function runMidnightCalcOnState(state: AppState, date: string): AppState 
 export interface Score {
   roommate: Roommate;
   turns: number;
+  /** Fills still owed (from past + falling behind today). */
   pending: number;
+  /** Extra fills banked — can skip until others catch up. */
+  credit: number;
+  /** Signed: +owe, −credit (used for suggestions). */
+  balance: number;
   priority: number;
   isPresent: boolean;
 }
@@ -146,12 +183,28 @@ export function getScores(state: AppState, date: string): Score[] {
   const carry = getMissedCarry(state, date);
   const day = getDayData(state, date);
 
+  const presentTurns = state.roommates
+    .filter((r) => (day.attendance[r.id] ?? "present") === "present")
+    .map((r) => turns.filter((t) => t.roommateId === r.id).length);
+
+  const maxAmongPresent = presentTurns.length ? Math.max(...presentTurns) : 0;
+  const minAmongPresent = presentTurns.length ? Math.min(...presentTurns) : 0;
+
   return state.roommates.map((r) => {
     const myTurns = turns.filter((t) => t.roommateId === r.id).length;
-    const pending = carry[r.id] ?? 0;
     const isPresent = (day.attendance[r.id] ?? "present") === "present";
-    const priority = isPresent ? myTurns - pending * 2 : Infinity;
-    return { roommate: r, turns: myTurns, pending, priority, isPresent };
+    const balance = computeBalance(
+      carry[r.id] ?? 0,
+      myTurns,
+      maxAmongPresent,
+      minAmongPresent,
+      isPresent
+    );
+    const pending = Math.max(0, balance);
+    const credit = Math.max(0, -balance);
+    // Higher priority → more behind → suggested sooner; credit lowers priority
+    const priority = isPresent ? myTurns + balance * 2 : Infinity;
+    return { roommate: r, turns: myTurns, pending, credit, balance, priority, isPresent };
   });
 }
 

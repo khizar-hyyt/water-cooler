@@ -34,10 +34,22 @@ function clx(...args: (string | false | null | undefined)[]) {
   return args.filter(Boolean).join(" ");
 }
 
+function balanceLabel(s: Score) {
+  if (s.credit > 0) return `${s.credit.toFixed(1)} credit`;
+  if (s.pending > 0) return `${s.pending.toFixed(1)} owed`;
+  return "even";
+}
+
+function balanceClass(s: Score) {
+  if (s.credit > 0) return "text-emerald-400";
+  if (s.pending > 0) return "text-rose-400";
+  return "text-slate-500";
+}
+
 function PendingForAll({ scores, highlightId }: { scores: Score[]; highlightId?: string }) {
   return (
     <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
-      <p className="text-slate-400 text-xs uppercase tracking-widest mb-3">Owed today (everyone)</p>
+      <p className="text-slate-400 text-xs uppercase tracking-widest mb-3">Balance (everyone)</p>
       <div className="space-y-2">
         {scores.map((s) => (
           <div
@@ -54,13 +66,8 @@ function PendingForAll({ scores, highlightId }: { scores: Score[]; highlightId?:
               {s.roommate.emoji}
             </span>
             <span className="flex-1 text-sm text-white font-medium">{s.roommate.name}</span>
-            <span
-              className={clx(
-                "text-sm font-bold tabular-nums",
-                s.pending > 0 ? "text-rose-400" : "text-slate-500"
-              )}
-            >
-              {s.pending > 0 ? `${s.pending.toFixed(1)} owed` : "0"}
+            <span className={clx("text-sm font-bold tabular-nums", balanceClass(s))}>
+              {balanceLabel(s)}
             </span>
           </div>
         ))}
@@ -178,6 +185,7 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
   const myScore = scores.find((s) => s.roommate.id === user.id);
   const myTurns = myScore?.turns ?? 0;
   const myPending = myScore?.pending ?? 0;
+  const myCredit = myScore?.credit ?? 0;
   const presentCount = scores.filter((s) => s.isPresent).length;
 
   const setAnyoneAttendance = async (id: string, status: "present" | "away") => {
@@ -266,6 +274,12 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
               {myPending.toFixed(1)} owed
             </div>
           )}
+          {myCredit > 0 && (
+            <div className="flex items-center gap-1.5 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-full px-3 py-1 text-xs font-medium">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              {myCredit.toFixed(1)} credit
+            </div>
+          )}
         </div>
         <button
           onClick={handleMark}
@@ -327,7 +341,7 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
                 )}
               </p>
               <p className="text-slate-500 text-xs">
-                {suggested.turns} turns · {suggested.pending > 0 ? `${suggested.pending.toFixed(1)} owed` : "balanced"}
+                {suggested.turns} turns · {balanceLabel(suggested)}
               </p>
             </div>
           </div>
@@ -384,16 +398,12 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
                       <Plus className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  <p className={clx("text-xs", s.pending > 0 ? "text-rose-400" : "text-slate-600")}>
-                    {s.pending > 0 ? `${s.pending.toFixed(1)} owed` : "0 owed"}
-                  </p>
+                  <p className={clx("text-xs", balanceClass(s))}>{balanceLabel(s)}</p>
                 </div>
               ) : (
                 <div className="text-right shrink-0">
                   <span className="font-bold text-white text-lg">{s.turns}</span>
-                  <p className={clx("text-xs", s.pending > 0 ? "text-rose-400" : "text-slate-600")}>
-                    {s.pending > 0 ? `${s.pending.toFixed(1)} owed` : "0 owed"}
-                  </p>
+                  <p className={clx("text-xs", balanceClass(s))}>{balanceLabel(s)}</p>
                 </div>
               )}
             </div>
@@ -474,7 +484,9 @@ function History() {
                   <span className="text-sm font-medium text-white">{s.roommate.name}</span>
                   {!s.isPresent && <span className="text-xs text-amber-400">Away</span>}
                 </div>
-                {s.pending > 0 && <p className="text-rose-400 text-xs">{s.pending.toFixed(1)} owed</p>}
+                {(s.pending > 0 || s.credit > 0) && (
+                  <p className={clx("text-xs", balanceClass(s))}>{balanceLabel(s)}</p>
+                )}
               </div>
               <span className="font-bold text-xl text-white">{s.turns}</span>
             </div>
