@@ -10,6 +10,10 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   try {
     const session = verifySessionToken(getBearerToken(request));
+    if (!session) {
+      return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+    }
+
     const body = await request.json();
     let action = body.action as MutateAction;
 
