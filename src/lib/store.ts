@@ -103,25 +103,31 @@ function roundBalance(n: number): number {
 }
 
 /**
- * Signed balance: positive = owes fills, negative = credit (did extra vs others who were present).
- * Compares each person to the most fills anyone present did that day (not an unknown "fair share").
+ * Signed balance: positive = owes fills, negative = credit.
+ * Uses the day's average among present people: total fills ÷ headcount.
+ *
+ * - Above average → credit (negative balance)
+ * - At average → no change from today (still only past carry)
+ * - Below average → owed (positive balance), stacks across days
+ *
+ * Away: credit burns as the present group's average catches up; debt frozen until return.
  */
 export function computeBalance(
   baseCarry: number,
   myTurns: number,
-  maxAmongPresent: number,
-  minAmongPresent: number,
+  fairShareAmongPresent: number,
   isPresent: boolean
 ): number {
-  if (!isPresent || maxAmongPresent === 0) return baseCarry;
+  if (!isPresent) {
+    if (baseCarry >= 0) return roundBalance(baseCarry);
+    if (fairShareAmongPresent === 0) return roundBalance(baseCarry);
+    return roundBalance(Math.min(0, Math.max(baseCarry, -(myTurns - fairShareAmongPresent))));
+  }
 
-  const behindToday = maxAmongPresent - myTurns;
-  const leaderSurplus =
-    maxAmongPresent > minAmongPresent && myTurns === maxAmongPresent
-      ? myTurns - minAmongPresent
-      : 0;
+  if (fairShareAmongPresent === 0) return roundBalance(baseCarry);
 
-  return roundBalance(baseCarry + behindToday - leaderSurplus);
+  const vsAverage = myTurns - fairShareAmongPresent;
+  return roundBalance(baseCarry - vsAverage);
 }
 
 export function runMidnightCalcOnState(state: AppState, date: string): AppState {
@@ -140,23 +146,23 @@ export function runMidnightCalcOnState(state: AppState, date: string): AppState 
   }
 
   const counts = presentIds.map((id) => turns.filter((t) => t.roommateId === id).length);
-  const maxTurns = Math.max(...counts, 0);
-  const minTurns = Math.min(...counts);
+  const totalAmongPresent = counts.reduce((sum, n) => sum + n, 0);
+  const fairShare = totalAmongPresent / presentIds.length;
 
   const prevCarry = getMissedCarry(state, date);
   const newCarry: Record<string, number> = {};
 
   presentIds.forEach((id) => {
     const myTurns = turns.filter((t) => t.roommateId === id).length;
-    const balance = computeBalance(prevCarry[id] ?? 0, myTurns, maxTurns, minTurns, true);
+    const balance = computeBalance(prevCarry[id] ?? 0, myTurns, fairShare, true);
     if (Math.abs(balance) > 0.05) newCarry[id] = balance;
   });
 
-  // Away: keep existing balance, unchanged by this day's fills
   state.roommates.forEach((r) => {
     if (presentIds.includes(r.id)) return;
-    const prev = prevCarry[r.id];
-    if (prev !== undefined && Math.abs(prev) > 0.05) newCarry[r.id] = prev;
+    const myTurns = turns.filter((t) => t.roommateId === r.id).length;
+    const balance = computeBalance(prevCarry[r.id] ?? 0, myTurns, fairShare, false);
+    if (Math.abs(balance) > 0.05) newCarry[r.id] = balance;
   });
 
   const tDate = addDays(date, 1);
@@ -187,19 +193,14 @@ export function getScores(state: AppState, date: string): Score[] {
     .filter((r) => (day.attendance[r.id] ?? "present") === "present")
     .map((r) => turns.filter((t) => t.roommateId === r.id).length);
 
-  const maxAmongPresent = presentTurns.length ? Math.max(...presentTurns) : 0;
-  const minAmongPresent = presentTurns.length ? Math.min(...presentTurns) : 0;
+  const presentCount = presentTurns.length;
+  const totalAmongPresent = presentTurns.reduce((sum, n) => sum + n, 0);
+  const fairShare = presentCount > 0 ? totalAmongPresent / presentCount : 0;
 
   return state.roommates.map((r) => {
     const myTurns = turns.filter((t) => t.roommateId === r.id).length;
     const isPresent = (day.attendance[r.id] ?? "present") === "present";
-    const balance = computeBalance(
-      carry[r.id] ?? 0,
-      myTurns,
-      maxAmongPresent,
-      minAmongPresent,
-      isPresent
-    );
+    const balance = computeBalance(carry[r.id] ?? 0, myTurns, fairShare, isPresent);
     const pending = Math.max(0, balance);
     const credit = Math.max(0, -balance);
     // Higher priority → more behind → suggested sooner; credit lowers priority

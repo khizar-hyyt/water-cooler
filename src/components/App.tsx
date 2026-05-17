@@ -260,6 +260,11 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
             </button>
           ))}
         </div>
+        {myStatus === "away" && myCredit > 0 && (
+          <p className="text-amber-300/90 text-xs mt-3">
+            Credit drops as the group average catches up while you&apos;re away. You won&apos;t owe anything until you&apos;re back.
+          </p>
+        )}
       </div>
 
       <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
