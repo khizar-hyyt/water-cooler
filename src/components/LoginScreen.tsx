@@ -15,7 +15,7 @@ export default function LoginScreen({
 }: {
   onLoggedIn: (needsPasswordSetup: boolean) => void;
 }) {
-  const { state, loading, error, storage, login } = useAppState();
+  const { state, loading, error, storage, persistent, login } = useAppState();
   const [step, setStep] = useState<Step>({ kind: "pick" });
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -179,14 +179,18 @@ export default function LoginScreen({
           </div>
         )}
 
-        <p className="text-center text-slate-500 text-xs mt-4 flex items-center justify-center gap-1">
-          {storage === "kv" ? (
+        <p
+          className={`text-center text-xs mt-4 flex items-center justify-center gap-1 ${
+            persistent ? "text-slate-500" : "text-amber-400"
+          }`}
+        >
+          {persistent ? (
             <>
               <Cloud className="w-3 h-3" /> Synced across all devices
             </>
           ) : (
             <>
-              <CloudOff className="w-3 h-3" /> Shared on this server (local dev)
+              <CloudOff className="w-3 h-3" /> Storage not connected — changes may not save
             </>
           )}
         </p>

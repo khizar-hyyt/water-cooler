@@ -27,6 +27,7 @@ interface AppStateContextValue {
   saving: boolean;
   error: string | null;
   storage: "kv" | "file" | null;
+  persistent: boolean;
   isAdmin: boolean;
   refresh: () => Promise<void>;
   login: (
@@ -52,16 +53,21 @@ interface AppStateContextValue {
 
 const AppStateContext = createContext<AppStateContextValue | null>(null);
 
-async function fetchState(): Promise<{ state: AppState; storage: "kv" | "file" }> {
+async function fetchState(): Promise<{ state: AppState; storage: "kv" | "file"; persistent: boolean }> {
   const res = await fetch("/api/state", { cache: "no-store" });
   if (!res.ok) throw new Error("Could not load shared data");
   const data = await res.json();
-  return { state: normalizeState(data.state), storage: data.storage };
+  return {
+    state: normalizeState(data.state),
+    storage: data.storage,
+    persistent: data.persistent !== false,
+  };
 }
 
 async function postMutate(token: string, action: MutateAction): Promise<AppState> {
   const res = await fetch("/api/mutate", {
     method: "POST",
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
@@ -70,7 +76,7 @@ async function postMutate(token: string, action: MutateAction): Promise<AppState
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Could not save");
-  return data.state as AppState;
+  return normalizeState(data.state);
 }
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
@@ -80,6 +86,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [storage, setStorage] = useState<"kv" | "file" | null>(null);
+  const [persistent, setPersistent] = useState(true);
   const stateRef = useRef(state);
   const sessionRef = useRef(session);
   stateRef.current = state;
@@ -90,9 +97,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshInternal = useCallback(async () => {
-    const { state: remote, storage: mode } = await fetchState();
+    const { state: remote, storage: mode, persistent: ok } = await fetchState();
     setState(remote);
     setStorage(mode);
+    setPersistent(ok);
     setError(null);
     return remote;
   }, []);
@@ -114,8 +122,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setSaving(true);
     setError(null);
     try {
-      const saved = normalizeState(await postMutate(tok, action));
+      const saved = await postMutate(tok, action);
       setState(saved);
+      try {
+        const { state: remote } = await fetchState();
+        setState(remote);
+      } catch {
+        /* keep saved response if re-fetch fails */
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not save";
       setError(msg);
@@ -147,6 +161,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       saveSession(clientSession);
       setSession(clientSession);
       setError(null);
+      try {
+        const { state: remote, storage: mode, persistent: ok } = await fetchState();
+        setState(remote);
+        setStorage(mode);
+        setPersistent(ok);
+      } catch {
+        /* session is valid; state will sync on next poll */
+      }
       return { needsPasswordSetup: Boolean(data.needsPasswordSetup) };
     },
     []
@@ -155,7 +177,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     saveSession(null);
     setSession(null);
-  }, []);
+    refreshInternal().catch(() => {});
+  }, [refreshInternal]);
 
   const changePassword = useCallback(
     async (currentPassword: string, newPassword: string) => {
@@ -180,25 +203,32 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
     async function init() {
       try {
-        let { state: remote, storage: mode } = await fetchState();
+        let { state: remote, storage: mode, persistent: ok } = await fetchState();
 
         const legacy = collectLegacyLocalState();
         if (legacy) {
-          const res = await fetch("/api/migrate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ legacy }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            remote = data.state;
-            markLegacyMigrated();
+          const hasRemoteData =
+            remote.turns.length > 0 ||
+            Object.keys(remote.days).length > 0 ||
+            (remote.activities?.length ?? 0) > 0;
+          if (!hasRemoteData) {
+            const res = await fetch("/api/migrate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ legacy }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              remote = normalizeState(data.state);
+            }
           }
+          markLegacyMigrated();
         }
 
         if (!cancelled) {
-          setState(remote);
+          setState(normalizeState(remote));
           setStorage(mode);
+          setPersistent(ok);
           setError(null);
         }
       } catch {
@@ -211,7 +241,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     init();
 
     const onFocus = () => refreshInternal().catch(() => {});
-    const interval = setInterval(() => refreshInternal().catch(() => {}), 15000);
+    const interval = setInterval(() => refreshInternal().catch(() => {}), 4000);
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") onFocus();
@@ -231,6 +261,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     saving,
     error,
     storage,
+    persistent,
     isAdmin: session?.role === "admin",
     refresh,
     login,

@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
-import type { AppState } from "@/lib/types";
+import { normalizeState, type AppState } from "@/lib/types";
 import { getServerState, setServerState } from "@/lib/server-state";
 
 export const dynamic = "force-dynamic";
 
-/** One-time merge of legacy localStorage data (no auth). */
+function remoteHasData(state: AppState): boolean {
+  return state.turns.length > 0 || Object.keys(state.days).length > 0 || (state.activities?.length ?? 0) > 0;
+}
+
+/** One-time import of legacy localStorage — only when shared server state is still empty. */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -13,15 +17,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No legacy data" }, { status: 400 });
     }
 
-    const remote = await getServerState();
-    const merged: AppState = {
+    const remote = normalizeState(await getServerState());
+    if (remoteHasData(remote)) {
+      return NextResponse.json({ state: remote, skipped: true });
+    }
+
+    const merged = normalizeState({
       ...remote,
-      turns: [...remote.turns, ...(legacy.turns ?? [])].sort((a, b) => a.timestamp - b.timestamp),
-      days: { ...remote.days, ...(legacy.days ?? {}) },
-      midnightRan: [...remote.midnightRan, ...(legacy.midnightRan ?? [])].filter(
-        (d, i, arr) => arr.indexOf(d) === i
-      ),
-    };
+      turns: legacy.turns ?? [],
+      days: legacy.days ?? {},
+      midnightRan: legacy.midnightRan ?? [],
+      activities: legacy.activities ?? [],
+    });
 
     await setServerState(merged);
     return NextResponse.json({ state: merged });

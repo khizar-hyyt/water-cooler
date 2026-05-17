@@ -60,3 +60,8 @@ export async function setServerState(state: AppState): Promise<void> {
 export function storageMode(): "kv" | "file" {
   return redisCredentials() ? "kv" : "file";
 }
+
+/** False on Vercel without Upstash/Redis — writes do not survive across requests. */
+export function isPersistentStorage(): boolean {
+  return redisCredentials() !== null;
+}

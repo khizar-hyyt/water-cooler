@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Roommate, Score,
   getAttendanceStatus, getTurnsForDate,
@@ -138,34 +138,30 @@ function RecentTimeline({ items, state }: { items: TimelineItem[]; state: Return
 
 function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
   const { state, addTurn, setAttendance, runMidnightCalc, resetDay, setTurnCount } = useAppState();
-  const [scores, setScores] = useState<Score[]>([]);
-  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
-  const [myStatus, setMyStatus] = useState<"present" | "away">("present");
   const [justMarked, setJustMarked] = useState(false);
   const [marking, setMarking] = useState(false);
   const [resetting, setResetting] = useState(false);
   const date = today();
 
-  const refresh = useCallback(() => {
-    setScores(getScores(state, date));
-    setTimeline(getDayTimeline(state, date));
-    setMyStatus(getAttendanceStatus(state, date, user.id));
-  }, [state, date, user.id]);
+  const scores = useMemo(() => getScores(state, date), [state, date]);
+  const timeline = useMemo(() => getDayTimeline(state, date), [state, date]);
+  const myStatus = useMemo(
+    () => getAttendanceStatus(state, date, user.id),
+    [state, date, user.id]
+  );
 
   useEffect(() => {
-    refresh();
     const now = new Date();
     const midnight = new Date(now);
     midnight.setHours(24, 0, 5, 0);
     const timer = setTimeout(() => {
-      runMidnightCalc(date).then(refresh);
+      runMidnightCalc(date).catch(() => {});
     }, midnight.getTime() - now.getTime());
     return () => clearTimeout(timer);
-  }, [refresh, date, runMidnightCalc]);
+  }, [date, runMidnightCalc]);
 
   const handleAttendance = async (status: "present" | "away") => {
     await setAttendance(date, user.id, status);
-    setMyStatus(status);
   };
 
   const handleMark = async () => {
@@ -173,7 +169,6 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
     setMarking(true);
     await new Promise((r) => setTimeout(r, 300));
     await addTurn(user.id);
-    refresh();
     setJustMarked(true);
     setMarking(false);
     setTimeout(() => setJustMarked(false), 2000);
@@ -194,7 +189,6 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
     setResetting(true);
     try {
       await resetDay(date);
-      refresh();
     } finally {
       setResetting(false);
     }
@@ -202,7 +196,6 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
 
   const handleAdjustTurns = async (roommateId: string, count: number) => {
     await setTurnCount(date, roommateId, count);
-    refresh();
   };
 
   const maxTurns = Math.max(...scores.map((s) => s.turns), 1);
@@ -522,7 +515,7 @@ function History() {
 }
 
 export default function App() {
-  const { state, loading, error, saving, session, isAdmin, logout } = useAppState();
+  const { state, loading, error, saving, session, isAdmin, persistent, logout } = useAppState();
   const [view, setView] = useState<"dash" | "history" | "users" | "profile">("dash");
   const [setupPassword, setSetupPassword] = useState(false);
 
@@ -596,6 +589,12 @@ export default function App() {
         <p className="text-center text-amber-300 text-xs py-2 px-4 bg-amber-500/10 border-b border-amber-500/20">
           Set a password in Profile to secure your account.
           <button className="ml-2 underline" onClick={() => setSetupPassword(false)}>Dismiss</button>
+        </p>
+      )}
+
+      {!persistent && (
+        <p className="text-center text-amber-300 text-xs py-2 px-4 bg-amber-500/10 border-b border-amber-500/20">
+          Shared storage is not connected. Connect Upstash Redis in Vercel → Storage, then redeploy.
         </p>
       )}
 

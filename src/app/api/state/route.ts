@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
 import { getBearerToken, verifySessionToken } from "@/lib/auth";
-import { getServerState, setServerState, storageMode } from "@/lib/server-state";
+import { getServerState, isPersistentStorage, setServerState, storageMode } from "@/lib/server-state";
 import { normalizeState, type AppState } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const state = await getServerState();
-    return NextResponse.json({ state, storage: storageMode() });
+    const state = normalizeState(await getServerState());
+    return NextResponse.json(
+      { state, storage: storageMode(), persistent: isPersistentStorage() },
+      { headers: { "Cache-Control": "no-store, max-age=0" } }
+    );
   } catch (err) {
     console.error("GET /api/state", err);
     return NextResponse.json({ error: "Failed to load state" }, { status: 500 });

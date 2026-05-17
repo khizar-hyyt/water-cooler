@@ -192,6 +192,8 @@ export function removeRoommateFromState(state: AppState, id: string): AppState {
   return { ...state, roommates: state.roommates.filter((r) => r.id !== id) };
 }
 
+const MAX_ACTIVITIES = 200;
+
 function appendActivity(
   state: AppState,
   date: string,
@@ -205,7 +207,11 @@ function appendActivity(
     kind,
     message,
   };
-  return { ...state, activities: [...(state.activities ?? []), entry] };
+  const activities = [...(state.activities ?? []), entry];
+  return {
+    ...state,
+    activities: activities.length > MAX_ACTIVITIES ? activities.slice(-MAX_ACTIVITIES) : activities,
+  };
 }
 
 export function getActivitiesForDate(state: AppState, date: string): ActivityEntry[] {
@@ -230,13 +236,9 @@ export function getDayTimeline(state: AppState, date: string): TimelineItem[] {
 }
 
 export function resetDayInState(state: AppState, date: string): AppState {
-  const hadTurns = getTurnsForDate(state, date).length > 0;
-  const hadDay = Boolean(state.days[date]);
-  if (!hadTurns && !hadDay) return state;
-
   const days = { ...state.days };
   delete days[date];
-  let next: AppState = {
+  const next: AppState = {
     ...state,
     turns: state.turns.filter((t) => t.date !== date),
     days,
