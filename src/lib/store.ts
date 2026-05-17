@@ -1,4 +1,4 @@
-import type { AppState, DayData, Roommate, Turn } from "./types";
+import type { ActivityEntry, AppState, DayData, Roommate, TimelineItem, Turn } from "./types";
 
 export type { AppState, DayData, Roommate, Turn } from "./types";
 export { DEFAULT_ROOMMATES, EMOJI_OPTIONS, COLOR_OPTIONS, createDefaultState } from "./types";
@@ -190,6 +190,88 @@ export function updateRoommateInState(
 export function removeRoommateFromState(state: AppState, id: string): AppState {
   if (state.roommates.length <= 1) return state;
   return { ...state, roommates: state.roommates.filter((r) => r.id !== id) };
+}
+
+function appendActivity(
+  state: AppState,
+  date: string,
+  message: string,
+  kind: ActivityEntry["kind"]
+): AppState {
+  const entry: ActivityEntry = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    date,
+    timestamp: Date.now(),
+    kind,
+    message,
+  };
+  return { ...state, activities: [...(state.activities ?? []), entry] };
+}
+
+export function getActivitiesForDate(state: AppState, date: string): ActivityEntry[] {
+  return (state.activities ?? []).filter((a) => a.date === date);
+}
+
+export function getDayTimeline(state: AppState, date: string): TimelineItem[] {
+  const turns = getTurnsForDate(state, date).map((t) => ({
+    type: "turn" as const,
+    id: t.id,
+    timestamp: t.timestamp,
+    roommateId: t.roommateId,
+  }));
+  const activities = getActivitiesForDate(state, date).map((a) => ({
+    type: "activity" as const,
+    id: a.id,
+    timestamp: a.timestamp,
+    message: a.message,
+    kind: a.kind,
+  }));
+  return [...turns, ...activities].sort((a, b) => b.timestamp - a.timestamp);
+}
+
+export function resetDayInState(state: AppState, date: string): AppState {
+  const hadTurns = getTurnsForDate(state, date).length > 0;
+  const hadDay = Boolean(state.days[date]);
+  if (!hadTurns && !hadDay) return state;
+
+  const days = { ...state.days };
+  delete days[date];
+  let next: AppState = {
+    ...state,
+    turns: state.turns.filter((t) => t.date !== date),
+    days,
+    midnightRan: state.midnightRan.filter((d) => d !== date),
+  };
+  return appendActivity(next, date, "Admin reset today — all turns and attendance cleared", "admin_reset");
+}
+
+export function setRoommateTurnCountInState(
+  state: AppState,
+  date: string,
+  roommateId: string,
+  count: number
+): AppState {
+  const target = Math.max(0, Math.floor(count));
+  const prevCount = getTurnsForDate(state, date).filter((t) => t.roommateId === roommateId).length;
+  if (prevCount === target) return state;
+
+  const otherTurns = state.turns.filter((t) => t.date !== date || t.roommateId !== roommateId);
+  const base = Date.now();
+  const newTurns: Turn[] = Array.from({ length: target }, (_, i) => ({
+    id: `${base}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+    roommateId,
+    timestamp: base - (target - i) * 1000,
+    date,
+  }));
+
+  const name = findRoommate(state, roommateId)?.name ?? "Roommate";
+  let next: AppState = { ...state, turns: [...otherTurns, ...newTurns] };
+  return appendActivity(
+    next,
+    date,
+    `Admin set ${name}'s turns to ${target} (was ${prevCount})`,
+    "admin_turns"
+  );
 }
 
 // ── one-time migration from old localStorage-only data ─────────────────────

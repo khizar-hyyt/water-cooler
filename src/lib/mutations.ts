@@ -4,8 +4,10 @@ import {
   addRoommateToState,
   addTurnToState,
   removeRoommateFromState,
+  resetDayInState,
   runMidnightCalcOnState,
   setAttendanceInState,
+  setRoommateTurnCountInState,
   updateRoommateInState,
 } from "./store";
 
@@ -15,7 +17,9 @@ export type MutateAction =
   | { type: "addRoommate"; name: string; emoji: string; color: string }
   | { type: "updateRoommate"; id: string; patch: Partial<{ name: string; emoji: string; color: string }> }
   | { type: "removeRoommate"; id: string }
-  | { type: "runMidnightCalc"; date: string };
+  | { type: "runMidnightCalc"; date: string }
+  | { type: "resetDay"; date: string }
+  | { type: "setTurnCount"; date: string; roommateId: string; count: number };
 
 export function authorizeMutation(
   session: SessionPayload | null,
@@ -36,6 +40,9 @@ export function authorizeMutation(
       return "Admin only";
     case "runMidnightCalc":
       return null;
+    case "resetDay":
+    case "setTurnCount":
+      return "Admin only";
     default:
       return "Unknown action";
   }
@@ -55,6 +62,10 @@ export function applyMutation(state: AppState, action: MutateAction): AppState {
       return removeRoommateFromState(state, action.id);
     case "runMidnightCalc":
       return runMidnightCalcOnState(state, action.date);
+    case "resetDay":
+      return resetDayInState(state, action.date);
+    case "setTurnCount":
+      return setRoommateTurnCountInState(state, action.date, action.roommateId, action.count);
     default:
       return state;
   }

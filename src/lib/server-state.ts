@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { createClient } from "@vercel/kv";
-import { AppState, createDefaultState } from "./types";
+import { AppState, createDefaultState, normalizeState } from "./types";
 
 const STATE_KEY = "aquashift:state";
 const DATA_DIR = path.join(process.cwd(), ".data");
@@ -28,7 +28,7 @@ function getKv() {
 async function readFileState(): Promise<AppState> {
   try {
     const raw = await fs.readFile(DATA_FILE, "utf-8");
-    return JSON.parse(raw) as AppState;
+    return normalizeState(JSON.parse(raw) as Partial<AppState>);
   } catch {
     return createDefaultState();
   }
@@ -42,8 +42,8 @@ async function writeFileState(state: AppState): Promise<void> {
 export async function getServerState(): Promise<AppState> {
   const kv = getKv();
   if (kv) {
-    const data = await kv.get<AppState>(STATE_KEY);
-    return data ?? createDefaultState();
+    const data = await kv.get<Partial<AppState>>(STATE_KEY);
+    return data ? normalizeState(data) : createDefaultState();
   }
   return readFileState();
 }

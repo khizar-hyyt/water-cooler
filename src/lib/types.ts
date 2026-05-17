@@ -12,6 +12,18 @@ export interface Turn {
   date: string;
 }
 
+export interface ActivityEntry {
+  id: string;
+  date: string;
+  timestamp: number;
+  kind: "admin_reset" | "admin_turns";
+  message: string;
+}
+
+export type TimelineItem =
+  | { type: "turn"; id: string; timestamp: number; roommateId: string }
+  | { type: "activity"; id: string; timestamp: number; message: string; kind: ActivityEntry["kind"] };
+
 export interface DayData {
   date: string;
   attendance: Record<string, "present" | "away">;
@@ -23,6 +35,7 @@ export interface AppState {
   turns: Turn[];
   days: Record<string, DayData>;
   midnightRan: string[];
+  activities?: ActivityEntry[];
 }
 
 export const DEFAULT_ROOMMATES: Roommate[] = [
@@ -51,5 +64,18 @@ export function createDefaultState(): AppState {
     turns: [],
     days: {},
     midnightRan: [],
+    activities: [],
+  };
+}
+
+export function normalizeState(raw: Partial<AppState> | null | undefined): AppState {
+  const base = createDefaultState();
+  if (!raw) return base;
+  return {
+    roommates: raw.roommates?.length ? raw.roommates : base.roommates,
+    turns: raw.turns ?? [],
+    days: raw.days ?? {},
+    midnightRan: raw.midnightRan ?? [],
+    activities: raw.activities ?? [],
   };
 }

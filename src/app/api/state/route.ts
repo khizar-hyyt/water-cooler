@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getBearerToken, verifySessionToken } from "@/lib/auth";
 import { getServerState, setServerState, storageMode } from "@/lib/server-state";
-import type { AppState } from "@/lib/types";
+import { normalizeState, type AppState } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -27,12 +27,7 @@ export async function PUT(request: Request) {
     if (!body || !Array.isArray(body.roommates) || !Array.isArray(body.turns)) {
       return NextResponse.json({ error: "Invalid state" }, { status: 400 });
     }
-    const state: AppState = {
-      roommates: body.roommates,
-      turns: body.turns,
-      days: body.days ?? {},
-      midnightRan: body.midnightRan ?? [],
-    };
+    const state = normalizeState(body);
     if (state.roommates.length === 0) {
       return NextResponse.json({ error: "At least one roommate required" }, { status: 400 });
     }

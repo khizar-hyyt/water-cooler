@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { AppState, Roommate } from "./types";
-import { createDefaultState } from "./types";
+import { createDefaultState, normalizeState } from "./types";
 import type { MutateAction } from "./mutations";
 import type { SessionRole } from "./auth";
 import {
@@ -40,6 +40,8 @@ interface AppStateContextValue {
   addTurn: (roommateId: string) => Promise<void>;
   setAttendance: (date: string, roommateId: string, status: "present" | "away") => Promise<void>;
   runMidnightCalc: (date: string) => Promise<void>;
+  resetDay: (date: string) => Promise<void>;
+  setTurnCount: (date: string, roommateId: string, count: number) => Promise<void>;
   addRoommate: (name: string, emoji: string, color: string) => Promise<Roommate | null>;
   updateRoommate: (
     id: string,
@@ -53,7 +55,8 @@ const AppStateContext = createContext<AppStateContextValue | null>(null);
 async function fetchState(): Promise<{ state: AppState; storage: "kv" | "file" }> {
   const res = await fetch("/api/state", { cache: "no-store" });
   if (!res.ok) throw new Error("Could not load shared data");
-  return res.json();
+  const data = await res.json();
+  return { state: normalizeState(data.state), storage: data.storage };
 }
 
 async function postMutate(token: string, action: MutateAction): Promise<AppState> {
@@ -111,7 +114,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setSaving(true);
     setError(null);
     try {
-      const saved = await postMutate(tok, action);
+      const saved = normalizeState(await postMutate(tok, action));
       setState(saved);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not save";
@@ -238,6 +241,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setAttendance: (date, roommateId, status) =>
       mutate({ type: "setAttendance", date, roommateId, status }),
     runMidnightCalc: (date) => mutate({ type: "runMidnightCalc", date }),
+    resetDay: (date) => mutate({ type: "resetDay", date }),
+    setTurnCount: (date, roommateId, count) =>
+      mutate({ type: "setTurnCount", date, roommateId, count }),
     addRoommate: async (name, emoji, color) => {
       await mutate({ type: "addRoommate", name, emoji, color });
       const added = stateRef.current.roommates[stateRef.current.roommates.length - 1] ?? null;

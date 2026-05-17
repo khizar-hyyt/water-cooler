@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Roommate, Turn, Score,
+  Roommate, Score,
   getAttendanceStatus, getTurnsForDate,
-  getScores, getSuggestedNext,
+  getScores, getSuggestedNext, getDayTimeline,
   findRoommate, today, addDays,
 } from "@/lib/store";
+import type { TimelineItem } from "@/lib/types";
 import { useAppState } from "@/lib/AppStateContext";
 import LoginScreen from "@/components/LoginScreen";
 import ManageUsers from "@/components/ManageUsers";
@@ -16,7 +17,7 @@ import {
   Droplets, CheckCircle2, Home, Plane, Crown,
   RefreshCw, LogOut, LayoutDashboard, Calendar,
   ChevronLeft, ChevronRight, AlertCircle, Zap,
-  Users, Shield, UserCircle,
+  Users, Shield, UserCircle, RotateCcw, Minus, Plus,
 } from "lucide-react";
 
 function fmt(ts: number) {
@@ -104,18 +105,50 @@ function AdminAttendance({ scores, onSet }: {
   );
 }
 
+function RecentTimeline({ items, state }: { items: TimelineItem[]; state: ReturnType<typeof useAppState>["state"] }) {
+  return (
+    <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
+      <p className="text-slate-400 text-xs uppercase tracking-widest mb-3">Recent</p>
+      <div className="space-y-2">
+        {items.slice(0, 8).map((item) => {
+          if (item.type === "activity") {
+            return (
+              <div key={item.id} className="flex items-center gap-3">
+                <span className="w-8 h-8 rounded-lg flex items-center justify-center bg-violet-500/15 border border-violet-500/30">
+                  <Shield className="w-4 h-4 text-violet-300" />
+                </span>
+                <span className="text-violet-200 text-sm flex-1">{item.message}</span>
+                <span className="text-slate-500 text-xs shrink-0">{fmt(item.timestamp)}</span>
+              </div>
+            );
+          }
+          const r = findRoommate(state, item.roommateId);
+          return (
+            <div key={item.id} className="flex items-center gap-3">
+              <span className="text-base">{r?.emoji ?? "💧"}</span>
+              <span className="text-white text-sm flex-1">{r?.name ?? "Removed"} filled water</span>
+              <span className="text-slate-500 text-xs">{fmt(item.timestamp)}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
-  const { state, addTurn, setAttendance, runMidnightCalc } = useAppState();
+  const { state, addTurn, setAttendance, runMidnightCalc, resetDay, setTurnCount } = useAppState();
   const [scores, setScores] = useState<Score[]>([]);
-  const [turns, setTurns] = useState<Turn[]>([]);
+  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [myStatus, setMyStatus] = useState<"present" | "away">("present");
   const [justMarked, setJustMarked] = useState(false);
   const [marking, setMarking] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const date = today();
 
   const refresh = useCallback(() => {
     setScores(getScores(state, date));
-    setTurns(getTurnsForDate(state, date));
+    setTimeline(getDayTimeline(state, date));
     setMyStatus(getAttendanceStatus(state, date, user.id));
   }, [state, date, user.id]);
 
@@ -147,14 +180,31 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
   };
 
   const suggested = getSuggestedNext(scores);
-  const myTurns = turns.filter((t) => t.roommateId === user.id).length;
   const myScore = scores.find((s) => s.roommate.id === user.id);
+  const myTurns = myScore?.turns ?? 0;
   const myPending = myScore?.pending ?? 0;
   const presentCount = scores.filter((s) => s.isPresent).length;
 
   const setAnyoneAttendance = async (id: string, status: "present" | "away") => {
     await setAttendance(date, id, status);
   };
+
+  const handleResetDay = async () => {
+    if (!confirm("Reset today? All turns and attendance will be cleared for everyone.")) return;
+    setResetting(true);
+    try {
+      await resetDay(date);
+      refresh();
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const handleAdjustTurns = async (roommateId: string, count: number) => {
+    await setTurnCount(date, roommateId, count);
+    refresh();
+  };
+
   const maxTurns = Math.max(...scores.map((s) => s.turns), 1);
 
   return (
@@ -164,9 +214,27 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
         <p className="text-slate-500 text-xs">{presentCount} roommates present today</p>
       </div>
 
-      <PendingForAll scores={scores} highlightId={isAdmin ? undefined : user.id} />
-
       {isAdmin && <AdminAttendance scores={scores} onSet={setAnyoneAttendance} />}
+
+      {isAdmin && (
+        <div className="bg-slate-900 rounded-2xl p-4 border border-violet-500/30">
+          <p className="text-violet-300 text-xs uppercase tracking-widest mb-3 flex items-center gap-1">
+            <Shield className="w-3.5 h-3.5" /> Day controls
+          </p>
+          <button
+            type="button"
+            onClick={handleResetDay}
+            disabled={resetting}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25 disabled:opacity-50"
+          >
+            <RotateCcw className={clx("w-4 h-4", resetting && "animate-spin")} />
+            {resetting ? "Resetting…" : "Reset today"}
+          </button>
+          <p className="text-slate-500 text-xs mt-2">
+            Use +/− on Today&apos;s Board to change turn counts. Changes appear in Recent for everyone.
+          </p>
+        </div>
+      )}
 
       {!isAdmin && (
       <>
@@ -301,34 +369,48 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
                   />
                 </div>
               </div>
-              <div className="text-right shrink-0">
-                <span className="font-bold text-white text-lg">{s.turns}</span>
-                <p className={clx("text-xs", s.pending > 0 ? "text-rose-400" : "text-slate-600")}>
-                  {s.pending > 0 ? `${s.pending.toFixed(1)} owed` : "0 owed"}
-                </p>
-              </div>
+              {isAdmin ? (
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleAdjustTurns(s.roommate.id, s.turns - 1)}
+                      disabled={s.turns <= 0}
+                      className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white border border-slate-700 disabled:opacity-30"
+                      aria-label={`Decrease ${s.roommate.name} turns`}
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="font-bold text-white text-lg w-6 text-center tabular-nums">{s.turns}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleAdjustTurns(s.roommate.id, s.turns + 1)}
+                      className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white border border-slate-700"
+                      aria-label={`Increase ${s.roommate.name} turns`}
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <p className={clx("text-xs", s.pending > 0 ? "text-rose-400" : "text-slate-600")}>
+                    {s.pending > 0 ? `${s.pending.toFixed(1)} owed` : "0 owed"}
+                  </p>
+                </div>
+              ) : (
+                <div className="text-right shrink-0">
+                  <span className="font-bold text-white text-lg">{s.turns}</span>
+                  <p className={clx("text-xs", s.pending > 0 ? "text-rose-400" : "text-slate-600")}>
+                    {s.pending > 0 ? `${s.pending.toFixed(1)} owed` : "0 owed"}
+                  </p>
+                </div>
+              )}
             </div>
           ))}
         </div>
       </div>
 
-      {turns.length > 0 && (
-        <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
-          <p className="text-slate-400 text-xs uppercase tracking-widest mb-3">Recent</p>
-          <div className="space-y-2">
-            {[...turns].reverse().slice(0, 6).map((t) => {
-              const r = findRoommate(state, t.roommateId);
-              return (
-                <div key={t.id} className="flex items-center gap-3">
-                  <span className="text-base">{r?.emoji ?? "💧"}</span>
-                  <span className="text-white text-sm flex-1">{r?.name ?? "Removed"} filled water</span>
-                  <span className="text-slate-500 text-xs">{fmt(t.timestamp)}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <PendingForAll scores={scores} highlightId={isAdmin ? undefined : user.id} />
+
+      {timeline.length > 0 && <RecentTimeline items={timeline} state={state} />}
     </div>
   );
 }
@@ -460,10 +542,8 @@ export default function App() {
     return (
       <LoginScreen
         onLoggedIn={(needsSetup) => {
-          if (needsSetup) {
-            setSetupPassword(true);
-            setView("profile");
-          }
+          setView("dash");
+          if (needsSetup) setSetupPassword(true);
         }}
       />
     );
