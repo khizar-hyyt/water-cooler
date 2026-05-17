@@ -44,10 +44,9 @@ export function authorizeMutation(
     case "setAttendance":
       return action.roommateId === session.roommateId ? null : "Only admin can change others' status";
     case "addRoommate":
+      return "Admin only";
     case "updateRoommate":
-      if (session.role === "admin") return null;
-      if (action.id !== session.roommateId) return "You can only edit your own profile";
-      return null;
+      return action.id !== session.roommateId ? "You can only edit your own profile" : null;
     case "removeRoommate":
       return "Admin only";
     case "runMidnightCalc":
