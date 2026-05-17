@@ -8,6 +8,7 @@ import {
   resetDayInState,
   runMidnightCalcOnState,
   setAttendanceInState,
+  setRoommateBalanceInState,
   setRoommateTurnCountInState,
   today,
   updateRoommateInState,
@@ -22,7 +23,8 @@ export type MutateAction =
   | { type: "runMidnightCalc"; date: string }
   | { type: "resetDay"; date: string }
   | { type: "setTurnCount"; date: string; roommateId: string; count: number }
-  | { type: "recalculateFromDate"; fromDate: string };
+  | { type: "recalculateFromDate"; fromDate: string }
+  | { type: "setBalance"; date: string; roommateId: string; balance: number };
 
 export function authorizeMutation(
   session: SessionPayload | null,
@@ -45,6 +47,7 @@ export function authorizeMutation(
       return null;
     case "resetDay":
     case "setTurnCount":
+    case "setBalance":
     case "recalculateFromDate":
       return "Admin only";
     default:
@@ -78,6 +81,11 @@ export function applyMutation(state: AppState, action: MutateAction): AppState {
     }
     case "recalculateFromDate":
       return recalculateBalancesFromDate(state, action.fromDate);
+    case "setBalance": {
+      let next = setRoommateBalanceInState(state, action.date, action.roommateId, action.balance);
+      if (action.date < today()) next = recalculateBalancesFromDate(next, action.date);
+      return next;
+    }
     default:
       return state;
   }

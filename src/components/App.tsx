@@ -46,6 +46,42 @@ function balanceClass(s: Score) {
   return "text-slate-500";
 }
 
+function AdminBalanceAdjust({
+  score,
+  disabled,
+  onChange,
+}: {
+  score: Score;
+  disabled?: boolean;
+  onChange: (balance: number) => void;
+}) {
+  return (
+    <div className="flex items-center gap-0.5">
+      <button
+        type="button"
+        onClick={() => onChange(score.balance - 1)}
+        disabled={disabled}
+        aria-label={`Less owed / more credit for ${score.roommate.name}`}
+        className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white border border-slate-700 disabled:opacity-30"
+      >
+        <Minus className="w-3 h-3" />
+      </button>
+      <span className={clx("text-[10px] font-bold w-16 text-center tabular-nums leading-tight", balanceClass(score))}>
+        {balanceLabel(score)}
+      </span>
+      <button
+        type="button"
+        onClick={() => onChange(score.balance + 1)}
+        disabled={disabled}
+        aria-label={`More owed / less credit for ${score.roommate.name}`}
+        className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white border border-slate-700 disabled:opacity-30"
+      >
+        <Plus className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
+
 function PendingForAll({ scores, highlightId }: { scores: Score[]; highlightId?: string }) {
   return (
     <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
@@ -144,7 +180,8 @@ function RecentTimeline({ items, state }: { items: TimelineItem[]; state: Return
 }
 
 function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
-  const { state, addTurn, setAttendance, runMidnightCalc, resetDay, setTurnCount } = useAppState();
+  const { state, addTurn, setAttendance, runMidnightCalc, resetDay, setTurnCount, setBalance, saving } =
+    useAppState();
   const [justMarked, setJustMarked] = useState(false);
   const [marking, setMarking] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -203,7 +240,11 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
   };
 
   const handleAdjustTurns = async (roommateId: string, count: number) => {
-    await setTurnCount(date, roommateId, count);
+    await setTurnCount(date, roommateId, Math.max(0, count));
+  };
+
+  const handleSetBalance = async (roommateId: string, balance: number) => {
+    await setBalance(date, roommateId, balance);
   };
 
   const maxTurns = Math.max(...scores.map((s) => s.turns), 1);
@@ -232,7 +273,7 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
             {resetting ? "Resetting…" : "Reset today"}
           </button>
           <p className="text-slate-500 text-xs mt-2">
-            Use +/− on Today&apos;s Board to change turn counts. Changes appear in Recent for everyone.
+            Use +/− on fills or owed/credit under each name. Set someone owed or in credit even at 0 fills. Changes sync for everyone.
           </p>
         </div>
       )}
@@ -382,12 +423,13 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
                 </div>
               </div>
               {isAdmin ? (
-                <div className="flex flex-col items-end gap-1 shrink-0">
+                <div className="flex flex-col items-end gap-1.5 shrink-0">
                   <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-slate-500 w-8">Fills</span>
                     <button
                       type="button"
                       onClick={() => handleAdjustTurns(s.roommate.id, s.turns - 1)}
-                      disabled={s.turns <= 0}
+                      disabled={s.turns <= 0 || saving}
                       className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white border border-slate-700 disabled:opacity-30"
                       aria-label={`Decrease ${s.roommate.name} turns`}
                     >
@@ -397,13 +439,18 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
                     <button
                       type="button"
                       onClick={() => handleAdjustTurns(s.roommate.id, s.turns + 1)}
-                      className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white border border-slate-700"
-                      aria-label={`Increase ${s.roommate.name} turns`}
+                      disabled={saving}
+                      className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white border border-slate-700 disabled:opacity-30"
+                      aria-label={`Increase ${s.roommate.name} fills`}
                     >
                       <Plus className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  <p className={clx("text-xs", balanceClass(s))}>{balanceLabel(s)}</p>
+                  <AdminBalanceAdjust
+                    score={s}
+                    disabled={saving}
+                    onChange={(bal) => handleSetBalance(s.roommate.id, bal)}
+                  />
                 </div>
               ) : (
                 <div className="text-right shrink-0">
@@ -424,7 +471,7 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
 }
 
 function History({ isAdmin }: { isAdmin: boolean }) {
-  const { state, setTurnCount, setAttendance, recalculateFromDate, saving } = useAppState();
+  const { state, setTurnCount, setAttendance, setBalance, recalculateFromDate, saving } = useAppState();
   const [date, setDate] = useState(today);
   const [recalculating, setRecalculating] = useState(false);
 
@@ -441,7 +488,11 @@ function History({ isAdmin }: { isAdmin: boolean }) {
   };
 
   const handleAdjust = async (roommateId: string, count: number) => {
-    await setTurnCount(date, roommateId, count);
+    await setTurnCount(date, roommateId, Math.max(0, count));
+  };
+
+  const handleSetBalance = async (roommateId: string, balance: number) => {
+    await setBalance(date, roommateId, balance);
   };
 
   const handleAttendance = async (id: string, status: "present" | "away") => {
@@ -485,7 +536,7 @@ function History({ isAdmin }: { isAdmin: boolean }) {
             <Shield className="w-3.5 h-3.5" /> Edit this day (admin)
           </p>
           <p className="text-slate-500 text-xs mb-3">
-            Adjust fills or attendance. Past-day edits auto-update today&apos;s owed/credit. Average
+            Adjust fills, owed/credit (+/−), or attendance. Past-day edits auto-update today&apos;s balances. Target
             {presentCount > 0 ? `: target ${dayTarget} fill${dayTarget === 1 ? "" : "s"} each` : ": n/a"}.
           </p>
           {isPastDay && (
@@ -560,24 +611,31 @@ function History({ isAdmin }: { isAdmin: boolean }) {
                 )}
               </div>
               {isAdmin ? (
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleAdjust(s.roommate.id, s.turns - 1)}
-                    disabled={s.turns <= 0 || saving}
-                    className="p-1 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 disabled:opacity-30"
-                  >
-                    <Minus className="w-3.5 h-3.5" />
-                  </button>
-                  <span className="font-bold text-white text-lg w-6 text-center tabular-nums">{s.turns}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleAdjust(s.roommate.id, s.turns + 1)}
+                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleAdjust(s.roommate.id, s.turns - 1)}
+                      disabled={s.turns <= 0 || saving}
+                      className="p-1 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 disabled:opacity-30"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="font-bold text-white text-lg w-6 text-center tabular-nums">{s.turns}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleAdjust(s.roommate.id, s.turns + 1)}
+                      disabled={saving}
+                      className="p-1 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 disabled:opacity-30"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <AdminBalanceAdjust
+                    score={s}
                     disabled={saving}
-                    className="p-1 rounded-lg bg-slate-800 text-slate-400 border border-slate-700"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </button>
+                    onChange={(bal) => handleSetBalance(s.roommate.id, bal)}
+                  />
                 </div>
               ) : (
                 <span className="font-bold text-xl text-white shrink-0">{s.turns}</span>

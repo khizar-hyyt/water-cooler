@@ -259,6 +259,53 @@ export function getScores(state: AppState, date: string): Score[] {
   });
 }
 
+function dayBalanceContext(state: AppState, date: string) {
+  const turns = getTurnsForDate(state, date);
+  const day = getDayData(state, date);
+  const presentIds = state.roommates
+    .filter((r) => (day.attendance[r.id] ?? "present") === "present")
+    .map((r) => r.id);
+  const presentCount = presentIds.length;
+  const totalAmongPresent = presentIds.reduce(
+    (sum, id) => sum + turns.filter((t) => t.roommateId === id).length,
+    0
+  );
+  const target = fairTargetForDay(totalAmongPresent, presentCount);
+  return { target, presentCount };
+}
+
+/** Admin: set total signed balance (+owe / −credit) for a person on a date. */
+export function setRoommateBalanceInState(
+  state: AppState,
+  date: string,
+  roommateId: string,
+  desiredBalance: number
+): AppState {
+  const desired = intBalance(desiredBalance);
+  const day = getDayData(state, date);
+  const myTurns = getTurnsForDate(state, date).filter((t) => t.roommateId === roommateId).length;
+  const isPresent = (day.attendance[roommateId] ?? "present") === "present";
+  const { target } = dayBalanceContext(state, date);
+
+  const carry = isPresent ? desired - (target - myTurns) : desired;
+
+  const missedCarry = { ...day.missedCarry };
+  const stored = intBalance(carry);
+  if (stored === 0) delete missedCarry[roommateId];
+  else missedCarry[roommateId] = stored;
+
+  const name = findRoommate(state, roommateId)?.name ?? "Roommate";
+  const label =
+    desired > 0 ? `${desired} fills owed` : desired < 0 ? `${-desired} fills credit` : "even";
+
+  return appendActivity(
+    setDayData(state, date, { ...day, missedCarry }),
+    date,
+    `Admin set ${name} to ${label} on ${date}`,
+    "admin_balance"
+  );
+}
+
 export function getSuggestedNext(scores: Score[]): Score | null {
   const present = scores.filter((s) => s.isPresent);
   if (!present.length) return null;

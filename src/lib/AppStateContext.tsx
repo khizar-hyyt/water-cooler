@@ -43,6 +43,7 @@ interface AppStateContextValue {
   runMidnightCalc: (date: string) => Promise<void>;
   resetDay: (date: string) => Promise<void>;
   setTurnCount: (date: string, roommateId: string, count: number) => Promise<void>;
+  setBalance: (date: string, roommateId: string, balance: number) => Promise<void>;
   recalculateFromDate: (fromDate: string) => Promise<void>;
   addRoommate: (name: string, emoji: string, color: string) => Promise<Roommate | null>;
   updateRoommate: (
@@ -279,6 +280,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     resetDay: (date) => mutate({ type: "resetDay", date }),
     setTurnCount: (date, roommateId, count) =>
       mutate({ type: "setTurnCount", date, roommateId, count }),
+    setBalance: (date, roommateId, balance) =>
+      mutate({ type: "setBalance", date, roommateId, balance }),
     recalculateFromDate: (fromDate) => mutate({ type: "recalculateFromDate", fromDate }),
     addRoommate: async (name, emoji, color) => {
       await mutate({ type: "addRoommate", name, emoji, color });
