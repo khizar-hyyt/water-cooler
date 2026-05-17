@@ -36,6 +36,8 @@ export interface AppState {
   days: Record<string, DayData>;
   midnightRan: string[];
   activities?: ActivityEntry[];
+  /** Incremented on every server save; used to avoid stale polls overwriting fresh mutations. */
+  revision?: number;
 }
 
 export const DEFAULT_ROOMMATES: Roommate[] = [
@@ -65,6 +67,7 @@ export function createDefaultState(): AppState {
     days: {},
     midnightRan: [],
     activities: [],
+    revision: 0,
   };
 }
 
@@ -77,5 +80,6 @@ export function normalizeState(raw: Partial<AppState> | null | undefined): AppSt
     days: raw.days ?? {},
     midnightRan: raw.midnightRan ?? [],
     activities: raw.activities ?? [],
+    revision: raw.revision ?? 0,
   };
 }

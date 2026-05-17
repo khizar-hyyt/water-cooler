@@ -23,7 +23,10 @@ export async function POST(request: Request) {
     }
 
     const state = normalizeState(await getServerState());
-    const next = normalizeState(applyMutation(state, action));
+    const next = normalizeState({
+      ...applyMutation(state, action),
+      revision: (state.revision ?? 0) + 1,
+    });
 
     if (action.type === "removeRoommate" && next.roommates.length === 0) {
       return NextResponse.json({ error: "At least one roommate required" }, { status: 400 });

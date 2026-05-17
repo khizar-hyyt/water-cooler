@@ -89,6 +89,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [persistent, setPersistent] = useState(true);
   const stateRef = useRef(state);
   const sessionRef = useRef(session);
+  const savingRef = useRef(false);
   stateRef.current = state;
   sessionRef.current = session;
 
@@ -96,8 +97,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setSession(loadSession());
   }, []);
 
-  const refreshInternal = useCallback(async () => {
+  const refreshInternal = useCallback(async (force = false) => {
+    if (savingRef.current && !force) return stateRef.current;
+
     const { state: remote, storage: mode, persistent: ok } = await fetchState();
+    const localRev = stateRef.current.revision ?? 0;
+    const remoteRev = remote.revision ?? 0;
+    if (!force && remoteRev < localRev) return stateRef.current;
+
     setState(remote);
     setStorage(mode);
     setPersistent(ok);
@@ -108,7 +115,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      await refreshInternal();
+      await refreshInternal(true);
     } catch {
       setError("Could not load shared data");
     } finally {
@@ -119,22 +126,18 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const mutate = useCallback(async (action: MutateAction) => {
     const tok = sessionRef.current?.token;
     if (!tok) throw new Error("Not signed in");
+    savingRef.current = true;
     setSaving(true);
     setError(null);
     try {
       const saved = await postMutate(tok, action);
       setState(saved);
-      try {
-        const { state: remote } = await fetchState();
-        setState(remote);
-      } catch {
-        /* keep saved response if re-fetch fails */
-      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not save";
       setError(msg);
       throw e;
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }, []);
@@ -241,7 +244,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     init();
 
     const onFocus = () => refreshInternal().catch(() => {});
-    const interval = setInterval(() => refreshInternal().catch(() => {}), 4000);
+    const interval = setInterval(() => refreshInternal().catch(() => {}), 8000);
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") onFocus();
