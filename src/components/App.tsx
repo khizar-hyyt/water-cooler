@@ -169,6 +169,7 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
       {isAdmin && <AdminAttendance scores={scores} onSet={setAnyoneAttendance} />}
 
       {!isAdmin && (
+      <>
       <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
         <p className="text-slate-400 text-xs uppercase tracking-widest mb-3">Your Status</p>
         <div className="flex gap-2">
@@ -234,6 +235,7 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
           )}
         </button>
       </div>
+      </>
       )}
 
       {suggested && (
