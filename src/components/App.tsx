@@ -35,8 +35,8 @@ function clx(...args: (string | false | null | undefined)[]) {
 }
 
 function balanceLabel(s: Score) {
-  if (s.credit > 0) return `${s.credit.toFixed(1)} credit`;
-  if (s.pending > 0) return `${s.pending.toFixed(1)} owed`;
+  if (s.credit > 0) return `${s.credit} fill${s.credit === 1 ? "" : "s"} credit`;
+  if (s.pending > 0) return `${s.pending} fill${s.pending === 1 ? "" : "s"} owed`;
   return "even";
 }
 
@@ -260,9 +260,9 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
             </button>
           ))}
         </div>
-        {myStatus === "away" && myCredit > 0 && (
+        {myStatus === "away" && (myCredit > 0 || myPending > 0) && (
           <p className="text-amber-300/90 text-xs mt-3">
-            Credit drops as the group average catches up while you&apos;re away. You won&apos;t owe anything until you&apos;re back.
+            Your owed/credit is frozen while away. It only updates at midnight after you&apos;re back as present.
           </p>
         )}
       </div>
@@ -276,13 +276,13 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
           {myPending > 0 && (
             <div className="flex items-center gap-1.5 bg-rose-500/15 text-rose-400 border border-rose-500/30 rounded-full px-3 py-1 text-xs font-medium">
               <AlertCircle className="w-3.5 h-3.5" />
-              {myPending.toFixed(1)} owed
+              {myPending} owed
             </div>
           )}
           {myCredit > 0 && (
             <div className="flex items-center gap-1.5 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-full px-3 py-1 text-xs font-medium">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              {myCredit.toFixed(1)} credit
+              {myCredit} credit
             </div>
           )}
         </div>
@@ -423,16 +423,39 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
   );
 }
 
-function History() {
-  const { state } = useAppState();
+function History({ isAdmin }: { isAdmin: boolean }) {
+  const { state, setTurnCount, setAttendance, recalculateFromDate, saving } = useAppState();
   const [date, setDate] = useState(today);
+  const [recalculating, setRecalculating] = useState(false);
 
   const turns = getTurnsForDate(state, date);
   const scores = getScores(state, date);
+  const presentCount = scores.filter((s) => s.isPresent).length;
+  const totalFills = turns.length;
+  const dayTarget = presentCount > 0 ? Math.round(totalFills / presentCount) : 0;
+  const isPastDay = date < today();
 
   const move = (dir: number) => {
     const next = addDays(date, dir);
     if (next <= today()) setDate(next);
+  };
+
+  const handleAdjust = async (roommateId: string, count: number) => {
+    await setTurnCount(date, roommateId, count);
+  };
+
+  const handleAttendance = async (id: string, status: "present" | "away") => {
+    await setAttendance(date, id, status);
+  };
+
+  const handleRecalc = async () => {
+    if (!confirm(`Recalculate everyone's owed/credit from ${date} through today?`)) return;
+    setRecalculating(true);
+    try {
+      await recalculateFromDate(date);
+    } finally {
+      setRecalculating(false);
+    }
   };
 
   return (
@@ -456,13 +479,35 @@ function History() {
         </div>
       </div>
 
+      {isAdmin && (
+        <div className="bg-slate-900 rounded-2xl p-4 border border-violet-500/30">
+          <p className="text-violet-300 text-xs uppercase tracking-widest mb-2 flex items-center gap-1">
+            <Shield className="w-3.5 h-3.5" /> Edit this day (admin)
+          </p>
+          <p className="text-slate-500 text-xs mb-3">
+            Adjust fills or attendance. Past-day edits auto-update today&apos;s owed/credit. Average
+            {presentCount > 0 ? `: target ${dayTarget} fill${dayTarget === 1 ? "" : "s"} each` : ": n/a"}.
+          </p>
+          {isPastDay && (
+            <button
+              type="button"
+              onClick={handleRecalc}
+              disabled={recalculating || saving}
+              className="w-full py-2 rounded-xl text-sm font-medium bg-violet-500/15 text-violet-300 border border-violet-500/30 hover:bg-violet-500/25 disabled:opacity-50"
+            >
+              {recalculating ? "Recalculating…" : "Recalculate owed/credit from this day → today"}
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-3">
         {[
           { label: "Total Fills", value: turns.length, color: "text-sky-400" },
           { label: "Present", value: scores.filter((s) => s.isPresent).length, color: "text-emerald-400" },
           {
             label: "Pending",
-            value: scores.reduce((s, x) => s + x.pending, 0).toFixed(1),
+            value: scores.reduce((s, x) => s + x.pending, 0),
             color: "text-rose-400",
           },
         ].map(({ label, value, color }) => (
@@ -492,8 +537,51 @@ function History() {
                 {(s.pending > 0 || s.credit > 0) && (
                   <p className={clx("text-xs", balanceClass(s))}>{balanceLabel(s)}</p>
                 )}
+                {isAdmin && (
+                  <div className="flex gap-1 mt-2">
+                    {(["present", "away"] as const).map((st) => (
+                      <button
+                        key={st}
+                        type="button"
+                        onClick={() => handleAttendance(s.roommate.id, st)}
+                        className={clx(
+                          "px-2 py-0.5 rounded text-[10px] border",
+                          (s.isPresent ? "present" : "away") === st
+                            ? st === "present"
+                              ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                              : "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                            : "bg-slate-800 text-slate-500 border-slate-700"
+                        )}
+                      >
+                        {st === "present" ? "In" : "Away"}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-              <span className="font-bold text-xl text-white">{s.turns}</span>
+              {isAdmin ? (
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleAdjust(s.roommate.id, s.turns - 1)}
+                    disabled={s.turns <= 0 || saving}
+                    className="p-1 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 disabled:opacity-30"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="font-bold text-white text-lg w-6 text-center tabular-nums">{s.turns}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleAdjust(s.roommate.id, s.turns + 1)}
+                    disabled={saving}
+                    className="p-1 rounded-lg bg-slate-800 text-slate-400 border border-slate-700"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <span className="font-bold text-xl text-white shrink-0">{s.turns}</span>
+              )}
             </div>
           ))}
         </div>
@@ -623,7 +711,7 @@ export default function App() {
 
       <main className="flex-1 px-4 pt-5 overflow-y-auto">
         {view === "dash" && <Dashboard user={user} isAdmin={isAdmin} />}
-        {view === "history" && <History />}
+        {view === "history" && <History isAdmin={isAdmin} />}
         {view === "users" && isAdmin && <ManageUsers />}
         {view === "profile" && <ProfileSettings isAdmin={isAdmin} />}
       </main>

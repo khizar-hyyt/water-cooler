@@ -4,10 +4,12 @@ import {
   addRoommateToState,
   addTurnToState,
   removeRoommateFromState,
+  recalculateBalancesFromDate,
   resetDayInState,
   runMidnightCalcOnState,
   setAttendanceInState,
   setRoommateTurnCountInState,
+  today,
   updateRoommateInState,
 } from "./store";
 
@@ -19,7 +21,8 @@ export type MutateAction =
   | { type: "removeRoommate"; id: string }
   | { type: "runMidnightCalc"; date: string }
   | { type: "resetDay"; date: string }
-  | { type: "setTurnCount"; date: string; roommateId: string; count: number };
+  | { type: "setTurnCount"; date: string; roommateId: string; count: number }
+  | { type: "recalculateFromDate"; fromDate: string };
 
 export function authorizeMutation(
   session: SessionPayload | null,
@@ -42,6 +45,7 @@ export function authorizeMutation(
       return null;
     case "resetDay":
     case "setTurnCount":
+    case "recalculateFromDate":
       return "Admin only";
     default:
       return "Unknown action";
@@ -52,8 +56,11 @@ export function applyMutation(state: AppState, action: MutateAction): AppState {
   switch (action.type) {
     case "addTurn":
       return addTurnToState(state, action.roommateId, action.date);
-    case "setAttendance":
-      return setAttendanceInState(state, action.date, action.roommateId, action.status);
+    case "setAttendance": {
+      let next = setAttendanceInState(state, action.date, action.roommateId, action.status);
+      if (action.date < today()) next = recalculateBalancesFromDate(next, action.date);
+      return next;
+    }
     case "addRoommate":
       return addRoommateToState(state, action.name, action.emoji, action.color);
     case "updateRoommate":
@@ -64,8 +71,13 @@ export function applyMutation(state: AppState, action: MutateAction): AppState {
       return runMidnightCalcOnState(state, action.date);
     case "resetDay":
       return resetDayInState(state, action.date);
-    case "setTurnCount":
-      return setRoommateTurnCountInState(state, action.date, action.roommateId, action.count);
+    case "setTurnCount": {
+      let next = setRoommateTurnCountInState(state, action.date, action.roommateId, action.count);
+      if (action.date < today()) next = recalculateBalancesFromDate(next, action.date);
+      return next;
+    }
+    case "recalculateFromDate":
+      return recalculateBalancesFromDate(state, action.fromDate);
     default:
       return state;
   }

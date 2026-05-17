@@ -16,7 +16,7 @@ export interface ActivityEntry {
   id: string;
   date: string;
   timestamp: number;
-  kind: "admin_reset" | "admin_turns";
+  kind: "admin_reset" | "admin_turns" | "admin_recalc";
   message: string;
 }
 

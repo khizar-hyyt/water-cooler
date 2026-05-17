@@ -98,40 +98,48 @@ export function getMissedCarry(state: AppState, date: string): Record<string, nu
   return getDayData(state, date).missedCarry;
 }
 
-function roundBalance(n: number): number {
-  return Math.round(n * 10) / 10;
+function intBalance(n: number): number {
+  return Math.round(n);
+}
+
+/** Whole-fill target for the day: round(total fills ÷ present people). */
+export function fairTargetForDay(totalAmongPresent: number, presentCount: number): number {
+  if (presentCount === 0) return 0;
+  return Math.round(totalAmongPresent / presentCount);
 }
 
 /**
- * Signed balance: positive = owes fills, negative = credit.
- * Uses the day's average among present people: total fills ÷ headcount.
+ * Signed balance in whole fills: positive = owes buckets, negative = credit buckets.
  *
- * - Above average → credit (negative balance)
- * - At average → no change from today (still only past carry)
- * - Below average → owed (positive balance), stacks across days
+ * - Above daily target → credit (whole fills ahead)
+ * - At target → no change from today (past carry only)
+ * - Below target → owed (whole fills behind), stacks across days
  *
- * Away: credit burns as the present group's average catches up; debt frozen until return.
+ * Away: balance frozen until present again; midnight copies carry unchanged.
  */
 export function computeBalance(
   baseCarry: number,
   myTurns: number,
-  fairShareAmongPresent: number,
+  totalAmongPresent: number,
+  presentCount: number,
   isPresent: boolean
 ): number {
-  if (!isPresent) {
-    if (baseCarry >= 0) return roundBalance(baseCarry);
-    if (fairShareAmongPresent === 0) return roundBalance(baseCarry);
-    return roundBalance(Math.min(0, Math.max(baseCarry, -(myTurns - fairShareAmongPresent))));
-  }
+  const base = intBalance(baseCarry);
+  if (!isPresent) return base;
+  if (presentCount === 0) return base;
 
-  if (fairShareAmongPresent === 0) return roundBalance(baseCarry);
-
-  const vsAverage = myTurns - fairShareAmongPresent;
-  return roundBalance(baseCarry - vsAverage);
+  const target = fairTargetForDay(totalAmongPresent, presentCount);
+  const owedToday = Math.max(0, target - myTurns);
+  const creditToday = Math.max(0, myTurns - target);
+  return base + owedToday - creditToday;
 }
 
-export function runMidnightCalcOnState(state: AppState, date: string): AppState {
-  if (state.midnightRan.includes(date)) return state;
+export function runMidnightCalcOnState(
+  state: AppState,
+  date: string,
+  options?: { force?: boolean }
+): AppState {
+  if (!options?.force && state.midnightRan.includes(date)) return state;
 
   const turns = getTurnsForDate(state, date);
   const day = getDayData(state, date);
@@ -147,28 +155,65 @@ export function runMidnightCalcOnState(state: AppState, date: string): AppState 
 
   const counts = presentIds.map((id) => turns.filter((t) => t.roommateId === id).length);
   const totalAmongPresent = counts.reduce((sum, n) => sum + n, 0);
-  const fairShare = totalAmongPresent / presentIds.length;
+  const presentCount = presentIds.length;
 
   const prevCarry = getMissedCarry(state, date);
   const newCarry: Record<string, number> = {};
 
   presentIds.forEach((id) => {
     const myTurns = turns.filter((t) => t.roommateId === id).length;
-    const balance = computeBalance(prevCarry[id] ?? 0, myTurns, fairShare, true);
-    if (Math.abs(balance) > 0.05) newCarry[id] = balance;
+    const balance = computeBalance(
+      prevCarry[id] ?? 0,
+      myTurns,
+      totalAmongPresent,
+      presentCount,
+      true
+    );
+    if (balance !== 0) newCarry[id] = balance;
   });
 
   state.roommates.forEach((r) => {
     if (presentIds.includes(r.id)) return;
-    const myTurns = turns.filter((t) => t.roommateId === r.id).length;
-    const balance = computeBalance(prevCarry[r.id] ?? 0, myTurns, fairShare, false);
-    if (Math.abs(balance) > 0.05) newCarry[r.id] = balance;
+    const prev = intBalance(prevCarry[r.id] ?? 0);
+    if (prev !== 0) newCarry[r.id] = prev;
   });
 
   const tDate = addDays(date, 1);
   const tomorrowData = getDayData(state, tDate);
   next = setDayData(next, tDate, { ...tomorrowData, missedCarry: newCarry });
   return { ...next, midnightRan: [...next.midnightRan, date] };
+}
+
+/** Replay midnight from a past date through yesterday so today's owed/credit reflect edits. */
+export function recalculateBalancesFromDate(state: AppState, fromDate: string): AppState {
+  const end = today();
+  if (fromDate >= end) return state;
+
+  let next: AppState = {
+    ...state,
+    midnightRan: state.midnightRan.filter((d) => d < fromDate),
+  };
+
+  const newDays = { ...next.days };
+  for (const key of Object.keys(newDays)) {
+    if (key >= fromDate) {
+      newDays[key] = { ...newDays[key], missedCarry: {} };
+    }
+  }
+  next = { ...next, days: newDays };
+
+  let d = fromDate;
+  while (d < end) {
+    next = runMidnightCalcOnState(next, d, { force: true });
+    d = addDays(d, 1);
+  }
+
+  return appendActivity(
+    next,
+    fromDate,
+    `Admin recalculated balances from ${fromDate} through today`,
+    "admin_recalc"
+  );
 }
 
 export interface Score {
@@ -195,12 +240,17 @@ export function getScores(state: AppState, date: string): Score[] {
 
   const presentCount = presentTurns.length;
   const totalAmongPresent = presentTurns.reduce((sum, n) => sum + n, 0);
-  const fairShare = presentCount > 0 ? totalAmongPresent / presentCount : 0;
 
   return state.roommates.map((r) => {
     const myTurns = turns.filter((t) => t.roommateId === r.id).length;
     const isPresent = (day.attendance[r.id] ?? "present") === "present";
-    const balance = computeBalance(carry[r.id] ?? 0, myTurns, fairShare, isPresent);
+    const balance = computeBalance(
+      carry[r.id] ?? 0,
+      myTurns,
+      totalAmongPresent,
+      presentCount,
+      isPresent
+    );
     const pending = Math.max(0, balance);
     const credit = Math.max(0, -balance);
     // Higher priority → more behind → suggested sooner; credit lowers priority
