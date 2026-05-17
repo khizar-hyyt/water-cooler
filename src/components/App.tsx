@@ -3,18 +3,20 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Roommate, Turn, Score,
-  getSavedUser, saveUserId,
   getAttendanceStatus, getTurnsForDate,
-  getScores, getSuggestedNext, getMissedCarry,
+  getScores, getSuggestedNext,
   findRoommate, today, addDays,
 } from "@/lib/store";
 import { useAppState } from "@/lib/AppStateContext";
+import LoginScreen from "@/components/LoginScreen";
 import ManageUsers from "@/components/ManageUsers";
+import ProfileSettings from "@/components/ProfileSettings";
+import { ADMIN_PROFILE } from "@/lib/session-client";
 import {
   Droplets, CheckCircle2, Home, Plane, Crown,
   RefreshCw, LogOut, LayoutDashboard, Calendar,
   ChevronLeft, ChevronRight, AlertCircle, Zap,
-  Users, Cloud, CloudOff,
+  Users, Shield, UserCircle,
 } from "lucide-react";
 
 function fmt(ts: number) {
@@ -31,74 +33,78 @@ function clx(...args: (string | false | null | undefined)[]) {
   return args.filter(Boolean).join(" ");
 }
 
-function SelectScreen({ onSelect }: { onSelect: (r: Roommate) => void }) {
-  const { state, loading, error, storage } = useAppState();
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Droplets className="w-8 h-8 text-sky-500 animate-pulse" />
-      </div>
-    );
-  }
-
+function PendingForAll({ scores, highlightId }: { scores: Score[]; highlightId?: string }) {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6">
-      <div className="w-full max-w-xs">
-        <div className="flex flex-col items-center mb-10">
-          <div className="w-16 h-16 rounded-3xl bg-sky-500 flex items-center justify-center mb-4 shadow-lg shadow-sky-500/30">
-            <Droplets className="w-8 h-8 text-white" />
+    <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
+      <p className="text-slate-400 text-xs uppercase tracking-widest mb-3">Owed today (everyone)</p>
+      <div className="space-y-2">
+        {scores.map((s) => (
+          <div
+            key={s.roommate.id}
+            className={clx(
+              "flex items-center gap-3 rounded-xl px-3 py-2 border",
+              s.roommate.id === highlightId ? "border-sky-500/40 bg-sky-500/10" : "border-slate-800 bg-slate-800/50"
+            )}
+          >
+            <span
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-sm"
+              style={{ background: s.roommate.color + "25", border: `1px solid ${s.roommate.color}40` }}
+            >
+              {s.roommate.emoji}
+            </span>
+            <span className="flex-1 text-sm text-white font-medium">{s.roommate.name}</span>
+            <span
+              className={clx(
+                "text-sm font-bold tabular-nums",
+                s.pending > 0 ? "text-rose-400" : "text-slate-500"
+              )}
+            >
+              {s.pending > 0 ? `${s.pending.toFixed(1)} owed` : "0"}
+            </span>
           </div>
-          <h1 className="text-2xl font-bold text-white mb-1">AquaShift</h1>
-          <p className="text-slate-400 text-sm text-center">Water cooler duty tracker</p>
-        </div>
-
-        {error && (
-          <p className="text-rose-400 text-xs text-center mb-3 bg-rose-500/10 border border-rose-500/30 rounded-lg px-3 py-2">
-            {error}
-          </p>
-        )}
-
-        <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
-          <p className="text-slate-400 text-xs uppercase tracking-widest mb-3 text-center">
-            Who are you?
-          </p>
-          <div className="space-y-2">
-            {state.roommates.map((r) => (
-              <button
-                key={r.id}
-                onClick={() => onSelect(r)}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-500 transition-all"
-              >
-                <span
-                  className="w-9 h-9 rounded-xl flex items-center justify-center text-lg"
-                  style={{ background: r.color + "25", border: `1px solid ${r.color}40` }}
-                >
-                  {r.emoji}
-                </span>
-                <span className="font-semibold text-white">{r.name}</span>
-                <span className="ml-auto text-slate-500 text-sm">→</span>
-              </button>
-            ))}
-          </div>
-        </div>
-        <p className="text-center text-slate-500 text-xs mt-4 flex items-center justify-center gap-1">
-          {storage === "kv" ? (
-            <>
-              <Cloud className="w-3 h-3" /> Synced across all devices
-            </>
-          ) : (
-            <>
-              <CloudOff className="w-3 h-3" /> Shared on this server (local dev)
-            </>
-          )}
-        </p>
+        ))}
       </div>
     </div>
   );
 }
 
-function Dashboard({ user }: { user: Roommate }) {
+function AdminAttendance({ scores, onSet }: {
+  scores: Score[];
+  onSet: (id: string, status: "present" | "away") => void;
+}) {
+  return (
+    <div className="bg-slate-900 rounded-2xl p-4 border border-violet-500/30">
+      <p className="text-violet-300 text-xs uppercase tracking-widest mb-3 flex items-center gap-1">
+        <Shield className="w-3.5 h-3.5" /> Everyone&apos;s status (admin)
+      </p>
+      <div className="space-y-2">
+        {scores.map((s) => (
+          <div key={s.roommate.id} className="flex items-center gap-2">
+            <span className="text-sm text-white flex-1 truncate">{s.roommate.emoji} {s.roommate.name}</span>
+            {(["present", "away"] as const).map((st) => (
+              <button
+                key={st}
+                onClick={() => onSet(s.roommate.id, st)}
+                className={clx(
+                  "px-2.5 py-1 rounded-lg text-xs border",
+                  (s.isPresent ? "present" : "away") === st
+                    ? st === "present"
+                      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                      : "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                    : "bg-slate-800 text-slate-500 border-slate-700"
+                )}
+              >
+                {st === "present" ? "In" : "Away"}
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
   const { state, addTurn, setAttendance, runMidnightCalc } = useAppState();
   const [scores, setScores] = useState<Score[]>([]);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -142,8 +148,13 @@ function Dashboard({ user }: { user: Roommate }) {
 
   const suggested = getSuggestedNext(scores);
   const myTurns = turns.filter((t) => t.roommateId === user.id).length;
-  const myPending = getMissedCarry(state, date)[user.id] ?? 0;
+  const myScore = scores.find((s) => s.roommate.id === user.id);
+  const myPending = myScore?.pending ?? 0;
   const presentCount = scores.filter((s) => s.isPresent).length;
+
+  const setAnyoneAttendance = async (id: string, status: "present" | "away") => {
+    await setAttendance(date, id, status);
+  };
   const maxTurns = Math.max(...scores.map((s) => s.turns), 1);
 
   return (
@@ -153,6 +164,11 @@ function Dashboard({ user }: { user: Roommate }) {
         <p className="text-slate-500 text-xs">{presentCount} roommates present today</p>
       </div>
 
+      <PendingForAll scores={scores} highlightId={isAdmin ? undefined : user.id} />
+
+      {isAdmin && <AdminAttendance scores={scores} onSet={setAnyoneAttendance} />}
+
+      {!isAdmin && (
       <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
         <p className="text-slate-400 text-xs uppercase tracking-widest mb-3">Your Status</p>
         <div className="flex gap-2">
@@ -218,6 +234,7 @@ function Dashboard({ user }: { user: Roommate }) {
           )}
         </button>
       </div>
+      )}
 
       {suggested && (
         <div
@@ -282,11 +299,11 @@ function Dashboard({ user }: { user: Roommate }) {
                   />
                 </div>
               </div>
-              <div className="text-right">
+              <div className="text-right shrink-0">
                 <span className="font-bold text-white text-lg">{s.turns}</span>
-                {s.pending > 0 && (
-                  <p className="text-rose-400 text-xs">+{s.pending.toFixed(1)}</p>
-                )}
+                <p className={clx("text-xs", s.pending > 0 ? "text-rose-400" : "text-slate-600")}>
+                  {s.pending > 0 ? `${s.pending.toFixed(1)} owed` : "0 owed"}
+                </p>
               </div>
             </div>
           ))}
@@ -421,28 +438,15 @@ function History() {
 }
 
 export default function App() {
-  const { state, loading, error, saving } = useAppState();
-  const [user, setUser] = useState<Roommate | null>(null);
-  const [userLoaded, setUserLoaded] = useState(false);
-  const [view, setView] = useState<"dash" | "history" | "users">("dash");
+  const { state, loading, error, saving, session, isAdmin, logout } = useAppState();
+  const [view, setView] = useState<"dash" | "history" | "users" | "profile">("dash");
+  const [setupPassword, setSetupPassword] = useState(false);
 
-  useEffect(() => {
-    setUser(getSavedUser(state.roommates));
-    setUserLoaded(true);
-  }, [state.roommates]);
+  const user: Roommate = isAdmin
+    ? { id: ADMIN_PROFILE.id, name: ADMIN_PROFILE.name, emoji: ADMIN_PROFILE.emoji, color: ADMIN_PROFILE.color }
+    : session?.roommate!;
 
-  useEffect(() => {
-    if (!user) return;
-    const still = state.roommates.find((r) => r.id === user.id);
-    if (!still) {
-      saveUserId(null);
-      setUser(null);
-    } else if (still.name !== user.name || still.emoji !== user.emoji || still.color !== user.color) {
-      setUser(still);
-    }
-  }, [state.roommates, user]);
-
-  if (loading || !userLoaded) {
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Droplets className="w-8 h-8 text-sky-500 animate-pulse" />
@@ -450,16 +454,36 @@ export default function App() {
     );
   }
 
-  if (!user) {
+  if (!session) {
     return (
-      <SelectScreen
-        onSelect={(r) => {
-          saveUserId(r.id);
-          setUser(r);
+      <LoginScreen
+        onLoggedIn={(needsSetup) => {
+          if (needsSetup) {
+            setSetupPassword(true);
+            setView("profile");
+          }
         }}
       />
     );
   }
+
+  if (!isAdmin && session.roommate && !state.roommates.find((r) => r.id === session.roommate!.id)) {
+    logout();
+    return null;
+  }
+
+  const navItems = isAdmin
+    ? ([
+        { id: "dash" as const, label: "Dashboard", Icon: LayoutDashboard },
+        { id: "history" as const, label: "History", Icon: Calendar },
+        { id: "users" as const, label: "People", Icon: Users },
+        { id: "profile" as const, label: "Admin", Icon: Shield },
+      ] as const)
+    : ([
+        { id: "dash" as const, label: "Dashboard", Icon: LayoutDashboard },
+        { id: "history" as const, label: "History", Icon: Calendar },
+        { id: "profile" as const, label: "Profile", Icon: UserCircle },
+      ] as const);
 
   return (
     <div className="min-h-screen flex flex-col max-w-md mx-auto">
@@ -477,14 +501,21 @@ export default function App() {
             {user.emoji} {user.name}
           </span>
           <button
-            onClick={() => { saveUserId(null); setUser(null); }}
+            onClick={() => logout()}
             className="p-1.5 text-slate-500 hover:text-white rounded-lg transition-colors"
-            title="Switch user"
+            title="Sign out"
           >
             <LogOut className="w-4 h-4" />
           </button>
         </div>
       </header>
+
+      {setupPassword && (
+        <p className="text-center text-amber-300 text-xs py-2 px-4 bg-amber-500/10 border-b border-amber-500/20">
+          Set a password in Profile to secure your account.
+          <button className="ml-2 underline" onClick={() => setSetupPassword(false)}>Dismiss</button>
+        </p>
+      )}
 
       {error && (
         <p className="text-center text-rose-400 text-xs py-2 px-4 bg-rose-500/10 border-b border-rose-500/20">
@@ -493,17 +524,14 @@ export default function App() {
       )}
 
       <main className="flex-1 px-4 pt-5 overflow-y-auto">
-        {view === "dash" && <Dashboard user={user} />}
+        {view === "dash" && <Dashboard user={user} isAdmin={isAdmin} />}
         {view === "history" && <History />}
-        {view === "users" && <ManageUsers />}
+        {view === "users" && isAdmin && <ManageUsers />}
+        {view === "profile" && <ProfileSettings isAdmin={isAdmin} />}
       </main>
 
       <nav className="sticky bottom-0 bg-slate-950/90 backdrop-blur border-t border-slate-800 flex h-16">
-        {([
-          { id: "dash" as const, label: "Dashboard", Icon: LayoutDashboard },
-          { id: "history" as const, label: "History", Icon: Calendar },
-          { id: "users" as const, label: "People", Icon: Users },
-        ]).map(({ id, label, Icon }) => (
+        {navItems.map(({ id, label, Icon }) => (
           <button
             key={id}
             onClick={() => setView(id)}

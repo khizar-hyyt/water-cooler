@@ -12,9 +12,18 @@ Track who fills the water cooler fairly among roommates. Deploy once, share the 
 
 Data is stored on the server (not in each browser), so all devices stay in sync.
 
-## Manage roommates
+## Sign in & passwords
 
-Use the **People** tab to:
+- Tap your name and enter your password (set one in **Profile** if you have not yet).
+- **Admin sign in** (bottom of login screen): full control — add/remove roommates, set anyone present or away.
+- Each roommate can change **only their own** password in **Profile**.
+- First admin visit: enter a password on the Admin screen to lock the app, or set it later under **Admin** → password.
+
+Set `SESSION_SECRET` in Vercel environment variables for production (any long random string).
+
+## Manage roommates (admin only)
+
+Use the **People** tab when signed in as admin to:
 
 - **Add** a roommate (name, emoji, color)
 - **Edit** a name (pencil icon)

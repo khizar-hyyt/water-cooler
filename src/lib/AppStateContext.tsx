@@ -11,29 +11,40 @@ import {
 } from "react";
 import type { AppState, Roommate } from "./types";
 import { createDefaultState } from "./types";
+import type { MutateAction } from "./mutations";
+import type { SessionRole } from "./auth";
 import {
-  addRoommateToState,
-  addTurnToState,
-  collectLegacyLocalState,
-  markLegacyMigrated,
-  removeRoommateFromState,
-  runMidnightCalcOnState,
-  setAttendanceInState,
-  updateRoommateInState,
-} from "./store";
+  loadSession,
+  saveSession,
+  type ClientSession,
+} from "./session-client";
+import { collectLegacyLocalState, markLegacyMigrated } from "./store";
 
 interface AppStateContextValue {
   state: AppState;
+  session: ClientSession | null;
   loading: boolean;
   saving: boolean;
   error: string | null;
   storage: "kv" | "file" | null;
+  isAdmin: boolean;
   refresh: () => Promise<void>;
+  login: (
+    type: SessionRole,
+    roommateId: string | null,
+    password: string
+  ) => Promise<{ needsPasswordSetup: boolean }>;
+  logout: () => void;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  mutate: (action: MutateAction) => Promise<void>;
   addTurn: (roommateId: string) => Promise<void>;
   setAttendance: (date: string, roommateId: string, status: "present" | "away") => Promise<void>;
   runMidnightCalc: (date: string) => Promise<void>;
   addRoommate: (name: string, emoji: string, color: string) => Promise<Roommate | null>;
-  updateRoommate: (id: string, patch: Partial<Pick<Roommate, "name" | "emoji" | "color">>) => Promise<void>;
+  updateRoommate: (
+    id: string,
+    patch: Partial<Pick<Roommate, "name" | "emoji" | "color">>
+  ) => Promise<void>;
   removeRoommate: (id: string) => Promise<boolean>;
 }
 
@@ -45,50 +56,35 @@ async function fetchState(): Promise<{ state: AppState; storage: "kv" | "file" }
   return res.json();
 }
 
-async function persistState(state: AppState): Promise<AppState> {
-  const res = await fetch("/api/state", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(state),
+async function postMutate(token: string, action: MutateAction): Promise<AppState> {
+  const res = await fetch("/api/mutate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ action }),
   });
-  if (!res.ok) throw new Error("Could not save");
   const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Could not save");
   return data.state as AppState;
 }
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>(createDefaultState);
+  const [session, setSession] = useState<ClientSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [storage, setStorage] = useState<"kv" | "file" | null>(null);
   const stateRef = useRef(state);
+  const sessionRef = useRef(session);
   stateRef.current = state;
+  sessionRef.current = session;
 
-  const applyAndSave = useCallback(
-    async (updater: (s: AppState) => AppState) => {
-      const next = updater(stateRef.current);
-      setState(next);
-      setSaving(true);
-      setError(null);
-      try {
-        const saved = await persistState(next);
-        setState(saved);
-      } catch {
-        setError("Failed to save — retrying…");
-        try {
-          const { state: remote } = await fetchState();
-          setState(remote);
-          setError(null);
-        } catch {
-          setError("Could not sync with server");
-        }
-      } finally {
-        setSaving(false);
-      }
-    },
-    []
-  );
+  useEffect(() => {
+    setSession(loadSession());
+  }, []);
 
   const refreshInternal = useCallback(async () => {
     const { state: remote, storage: mode } = await fetchState();
@@ -109,6 +105,73 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }
   }, [refreshInternal]);
 
+  const mutate = useCallback(async (action: MutateAction) => {
+    const tok = sessionRef.current?.token;
+    if (!tok) throw new Error("Not signed in");
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await postMutate(tok, action);
+      setState(saved);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Could not save";
+      setError(msg);
+      throw e;
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
+  const login = useCallback(
+    async (type: SessionRole, roommateId: string | null, password: string) => {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type,
+          roommateId: type === "roommate" ? roommateId : undefined,
+          password: password || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Login failed");
+
+      const clientSession: ClientSession = {
+        token: data.token,
+        role: data.role,
+        roommate: data.roommate ?? null,
+      };
+      saveSession(clientSession);
+      setSession(clientSession);
+      setError(null);
+      return { needsPasswordSetup: Boolean(data.needsPasswordSetup) };
+    },
+    []
+  );
+
+  const logout = useCallback(() => {
+    saveSession(null);
+    setSession(null);
+  }, []);
+
+  const changePassword = useCallback(
+    async (currentPassword: string, newPassword: string) => {
+      const tok = sessionRef.current?.token;
+      if (!tok) throw new Error("Not signed in");
+      const res = await fetch("/api/auth/password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${tok}`,
+        },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not update password");
+    },
+    []
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -118,17 +181,16 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
         const legacy = collectLegacyLocalState();
         if (legacy) {
-          const merged: AppState = {
-            ...remote,
-            turns: [...remote.turns, ...(legacy.turns ?? [])].sort((a, b) => a.timestamp - b.timestamp),
-            days: { ...remote.days, ...(legacy.days ?? {}) },
-            midnightRan: [
-              ...remote.midnightRan,
-              ...(legacy.midnightRan ?? []),
-            ].filter((d, i, arr) => arr.indexOf(d) === i),
-          };
-          remote = await persistState(merged);
-          markLegacyMigrated();
+          const res = await fetch("/api/migrate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ legacy }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            remote = data.state;
+            markLegacyMigrated();
+          }
         }
 
         if (!cancelled) {
@@ -145,12 +207,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
     init();
 
-    const onFocus = () => {
-      refreshInternal().catch(() => {});
-    };
-    const interval = setInterval(() => {
-      refreshInternal().catch(() => {});
-    }, 15000);
+    const onFocus = () => refreshInternal().catch(() => {});
+    const interval = setInterval(() => refreshInternal().catch(() => {}), 15000);
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") onFocus();
@@ -165,28 +223,30 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const value: AppStateContextValue = {
     state,
+    session,
     loading,
     saving,
     error,
     storage,
+    isAdmin: session?.role === "admin",
     refresh,
-    addTurn: (roommateId) => applyAndSave((s) => addTurnToState(s, roommateId)),
+    login,
+    logout,
+    changePassword,
+    mutate,
+    addTurn: (roommateId) => mutate({ type: "addTurn", roommateId }),
     setAttendance: (date, roommateId, status) =>
-      applyAndSave((s) => setAttendanceInState(s, date, roommateId, status)),
-    runMidnightCalc: (date) => applyAndSave((s) => runMidnightCalcOnState(s, date)),
+      mutate({ type: "setAttendance", date, roommateId, status }),
+    runMidnightCalc: (date) => mutate({ type: "runMidnightCalc", date }),
     addRoommate: async (name, emoji, color) => {
-      let added: Roommate | null = null;
-      await applyAndSave((s) => {
-        const next = addRoommateToState(s, name, emoji, color);
-        added = next.roommates[next.roommates.length - 1] ?? null;
-        return next;
-      });
+      await mutate({ type: "addRoommate", name, emoji, color });
+      const added = stateRef.current.roommates[stateRef.current.roommates.length - 1] ?? null;
       return added;
     },
-    updateRoommate: (id, patch) => applyAndSave((s) => updateRoommateInState(s, id, patch)),
+    updateRoommate: (id, patch) => mutate({ type: "updateRoommate", id, patch }),
     removeRoommate: async (id) => {
       if (stateRef.current.roommates.length <= 1) return false;
-      await applyAndSave((s) => removeRoommateFromState(s, id));
+      await mutate({ type: "removeRoommate", id });
       return true;
     },
   };

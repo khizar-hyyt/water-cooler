@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { AppState, createDefaultState } from "@/lib/types";
+import { getBearerToken, verifySessionToken } from "@/lib/auth";
 import { getServerState, setServerState, storageMode } from "@/lib/server-state";
+import type { AppState } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -14,8 +15,14 @@ export async function GET() {
   }
 }
 
+/** Admin-only full state replace (rare). Prefer /api/mutate. */
 export async function PUT(request: Request) {
   try {
+    const session = verifySessionToken(getBearerToken(request));
+    if (session?.role !== "admin") {
+      return NextResponse.json({ error: "Admin only" }, { status: 403 });
+    }
+
     const body = (await request.json()) as AppState;
     if (!body || !Array.isArray(body.roommates) || !Array.isArray(body.turns)) {
       return NextResponse.json({ error: "Invalid state" }, { status: 400 });
@@ -34,27 +41,5 @@ export async function PUT(request: Request) {
   } catch (err) {
     console.error("PUT /api/state", err);
     return NextResponse.json({ error: "Failed to save state" }, { status: 500 });
-  }
-}
-
-export async function POST() {
-  try {
-    const existing = await getServerState();
-    const isEmpty =
-      existing.turns.length === 0 &&
-      Object.keys(existing.days).length === 0 &&
-      existing.roommates.every((r, i) => {
-        const d = createDefaultState().roommates[i];
-        return d && r.id === d.id && r.name === d.name;
-      });
-    if (!isEmpty) {
-      return NextResponse.json({ state: existing, storage: storageMode() });
-    }
-    const state = createDefaultState();
-    await setServerState(state);
-    return NextResponse.json({ state, storage: storageMode() });
-  } catch (err) {
-    console.error("POST /api/state", err);
-    return NextResponse.json({ error: "Failed to init state" }, { status: 500 });
   }
 }
