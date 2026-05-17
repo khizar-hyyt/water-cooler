@@ -67,12 +67,12 @@ export function setDayData(state: AppState, date: string, data: DayData): AppSta
   };
 }
 
-export function addTurnToState(state: AppState, roommateId: string): AppState {
+export function addTurnToState(state: AppState, roommateId: string, date: string): AppState {
   const turn: Turn = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     roommateId,
     timestamp: Date.now(),
-    date: today(),
+    date,
   };
   return { ...state, turns: [...state.turns, turn] };
 }

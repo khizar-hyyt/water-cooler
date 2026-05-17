@@ -12,7 +12,7 @@ import {
 } from "./store";
 
 export type MutateAction =
-  | { type: "addTurn"; roommateId: string }
+  | { type: "addTurn"; roommateId: string; date: string }
   | { type: "setAttendance"; date: string; roommateId: string; status: "present" | "away" }
   | { type: "addRoommate"; name: string; emoji: string; color: string }
   | { type: "updateRoommate"; id: string; patch: Partial<{ name: string; emoji: string; color: string }> }
@@ -51,7 +51,7 @@ export function authorizeMutation(
 export function applyMutation(state: AppState, action: MutateAction): AppState {
   switch (action.type) {
     case "addTurn":
-      return addTurnToState(state, action.roommateId);
+      return addTurnToState(state, action.roommateId, action.date);
     case "setAttendance":
       return setAttendanceInState(state, action.date, action.roommateId, action.status);
     case "addRoommate":

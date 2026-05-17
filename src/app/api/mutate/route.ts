@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getBearerToken, verifySessionToken } from "@/lib/auth";
 import { applyMutation, authorizeMutation, type MutateAction } from "@/lib/mutations";
 import { getAuthData, setAuthData } from "@/lib/auth-store";
-import { getServerState, setServerState } from "@/lib/server-state";
+import { getServerState, saveServerState } from "@/lib/server-state";
 import { normalizeState } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "At least one roommate required" }, { status: 400 });
     }
 
-    await setServerState(next);
+    const stored = await saveServerState(next);
 
     if (action.type === "removeRoommate") {
       const auth = await getAuthData();
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { state: next },
+      { state: stored },
       { headers: { "Cache-Control": "no-store, max-age=0" } }
     );
   } catch (err) {

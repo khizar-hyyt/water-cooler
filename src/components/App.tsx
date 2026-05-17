@@ -168,7 +168,7 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
     if (marking || myStatus === "away") return;
     setMarking(true);
     await new Promise((r) => setTimeout(r, 300));
-    await addTurn(user.id);
+    await addTurn(user.id, date);
     setJustMarked(true);
     setMarking(false);
     setTimeout(() => setJustMarked(false), 2000);

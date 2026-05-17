@@ -18,7 +18,7 @@ import {
   saveSession,
   type ClientSession,
 } from "./session-client";
-import { collectLegacyLocalState, markLegacyMigrated } from "./store";
+import { collectLegacyLocalState, markLegacyMigrated, today } from "./store";
 
 interface AppStateContextValue {
   state: AppState;
@@ -38,7 +38,7 @@ interface AppStateContextValue {
   logout: () => void;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   mutate: (action: MutateAction) => Promise<void>;
-  addTurn: (roommateId: string) => Promise<void>;
+  addTurn: (roommateId: string, date?: string) => Promise<void>;
   setAttendance: (date: string, roommateId: string, status: "present" | "away") => Promise<void>;
   runMidnightCalc: (date: string) => Promise<void>;
   resetDay: (date: string) => Promise<void>;
@@ -53,8 +53,18 @@ interface AppStateContextValue {
 
 const AppStateContext = createContext<AppStateContextValue | null>(null);
 
+function shouldApplyRemote(local: AppState, remote: AppState, force: boolean): boolean {
+  if (force) return true;
+  const localRev = local.revision ?? 0;
+  const remoteRev = remote.revision ?? 0;
+  if (remoteRev > localRev) return true;
+  if (remote.turns.length > local.turns.length) return true;
+  if (remoteRev < localRev) return false;
+  return true;
+}
+
 async function fetchState(): Promise<{ state: AppState; storage: "kv" | "file"; persistent: boolean }> {
-  const res = await fetch("/api/state", { cache: "no-store" });
+  const res = await fetch(`/api/state?_=${Date.now()}`, { cache: "no-store" });
   if (!res.ok) throw new Error("Could not load shared data");
   const data = await res.json();
   return {
@@ -101,9 +111,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     if (savingRef.current && !force) return stateRef.current;
 
     const { state: remote, storage: mode, persistent: ok } = await fetchState();
-    const localRev = stateRef.current.revision ?? 0;
-    const remoteRev = remote.revision ?? 0;
-    if (!force && remoteRev < localRev) return stateRef.current;
+    if (!shouldApplyRemote(stateRef.current, remote, force)) return stateRef.current;
 
     setState(remote);
     setStorage(mode);
@@ -164,24 +172,16 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       saveSession(clientSession);
       setSession(clientSession);
       setError(null);
-      try {
-        const { state: remote, storage: mode, persistent: ok } = await fetchState();
-        setState(remote);
-        setStorage(mode);
-        setPersistent(ok);
-      } catch {
-        /* session is valid; state will sync on next poll */
-      }
+      await refreshInternal(true);
       return { needsPasswordSetup: Boolean(data.needsPasswordSetup) };
     },
-    []
+    [refreshInternal]
   );
 
   const logout = useCallback(() => {
     saveSession(null);
     setSession(null);
-    refreshInternal().catch(() => {});
-  }, [refreshInternal]);
+  }, []);
 
   const changePassword = useCallback(
     async (currentPassword: string, newPassword: string) => {
@@ -271,7 +271,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     logout,
     changePassword,
     mutate,
-    addTurn: (roommateId) => mutate({ type: "addTurn", roommateId }),
+    addTurn: (roommateId, date = today()) => mutate({ type: "addTurn", roommateId, date }),
     setAttendance: (date, roommateId, status) =>
       mutate({ type: "setAttendance", date, roommateId, status }),
     runMidnightCalc: (date) => mutate({ type: "runMidnightCalc", date }),

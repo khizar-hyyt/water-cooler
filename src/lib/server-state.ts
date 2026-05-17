@@ -4,7 +4,10 @@ import { createClient } from "@vercel/kv";
 import { AppState, createDefaultState, normalizeState } from "./types";
 
 const STATE_KEY = "aquashift:state";
-const DATA_DIR = path.join(process.cwd(), ".data");
+/** Vercel's project dir is read-only; use /tmp so file mode works on a warm instance. */
+const DATA_DIR = process.env.VERCEL
+  ? path.join("/tmp", "aquashift-data")
+  : path.join(process.cwd(), ".data");
 const DATA_FILE = path.join(DATA_DIR, "state.json");
 
 /** Upstash (Marketplace) or legacy Vercel KV env names */
@@ -55,6 +58,19 @@ export async function setServerState(state: AppState): Promise<void> {
     return;
   }
   await writeFileState(state);
+}
+
+/** Write then read back so callers return what is actually stored. */
+export async function saveServerState(state: AppState): Promise<AppState> {
+  await setServerState(state);
+  const stored = normalizeState(await getServerState());
+  const expectedRev = state.revision ?? 0;
+  const storedRev = stored.revision ?? 0;
+  if (storedRev < expectedRev) {
+    await setServerState(state);
+    return normalizeState(await getServerState());
+  }
+  return stored;
 }
 
 export function storageMode(): "kv" | "file" {
