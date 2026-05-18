@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const fetchCache = "force-no-store";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const calToday = calendarToday(resolveTimeZone(request));
     const raw = normalizeState(await getServerState());
