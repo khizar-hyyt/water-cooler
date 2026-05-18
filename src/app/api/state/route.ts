@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getBearerToken, verifySessionToken } from "@/lib/auth";
-import { ensureMidnightCaughtUp } from "@/lib/store";
+import { syncCarryChain } from "@/lib/store";
+import { calendarToday, resolveTimeZone } from "@/lib/timezone";
 import { getServerState, isPersistentStorage, saveServerState, setServerState, storageMode } from "@/lib/server-state";
 import { normalizeState, type AppState } from "@/lib/types";
 
@@ -10,8 +11,9 @@ export const fetchCache = "force-no-store";
 
 export async function GET() {
   try {
+    const calToday = calendarToday(resolveTimeZone(request));
     const raw = normalizeState(await getServerState());
-    const maintained = ensureMidnightCaughtUp(raw);
+    const maintained = syncCarryChain(raw, calToday);
     const state =
       JSON.stringify(maintained) !== JSON.stringify(raw)
         ? await saveServerState({

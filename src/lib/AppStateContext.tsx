@@ -19,6 +19,15 @@ import {
   type ClientSession,
 } from "./session-client";
 import { collectLegacyLocalState, markLegacyMigrated, today } from "./store";
+import { resolveTimeZone, TZ_HEADER } from "./timezone";
+
+function apiHeaders(token?: string): HeadersInit {
+  const headers: Record<string, string> = {
+    [TZ_HEADER]: resolveTimeZone(),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
 
 interface AppStateContextValue {
   state: AppState;
@@ -67,7 +76,10 @@ function shouldApplyRemote(local: AppState, remote: AppState, force: boolean): b
 }
 
 async function fetchState(): Promise<{ state: AppState; storage: "kv" | "file"; persistent: boolean }> {
-  const res = await fetch(`/api/state?_=${Date.now()}`, { cache: "no-store" });
+  const res = await fetch(`/api/state?_=${Date.now()}`, {
+    cache: "no-store",
+    headers: { [TZ_HEADER]: resolveTimeZone() },
+  });
   if (!res.ok) throw new Error("Could not load shared data");
   const data = await res.json();
   return {
@@ -83,7 +95,7 @@ async function postMutate(token: string, action: MutateAction): Promise<AppState
     cache: "no-store",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
+      ...apiHeaders(token),
     },
     body: JSON.stringify({ action }),
   });

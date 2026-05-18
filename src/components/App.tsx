@@ -180,7 +180,7 @@ function RecentTimeline({ items, state }: { items: TimelineItem[]; state: Return
 }
 
 function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
-  const { state, addTurn, removeLastTurn, setAttendance, runMidnightCalc, resetDay, setTurnCount, setBalance, saving } =
+  const { state, addTurn, removeLastTurn, setAttendance, runMidnightCalc, resetDay, setTurnCount, setBalance, refresh, saving } =
     useAppState();
   const [justMarked, setJustMarked] = useState(false);
   const [marking, setMarking] = useState(false);
@@ -200,10 +200,13 @@ function Dashboard({ user, isAdmin }: { user: Roommate; isAdmin: boolean }) {
     const midnight = new Date(now);
     midnight.setHours(24, 0, 5, 0);
     const timer = setTimeout(() => {
-      runMidnightCalc(date).catch(() => {});
+      const dayJustEnded = addDays(today(), -1);
+      runMidnightCalc(dayJustEnded)
+        .then(() => refresh())
+        .catch(() => {});
     }, midnight.getTime() - now.getTime());
     return () => clearTimeout(timer);
-  }, [date, runMidnightCalc]);
+  }, [runMidnightCalc, refresh]);
 
   const handleAttendance = async (status: "present" | "away") => {
     await setAttendance(date, user.id, status);

@@ -3,7 +3,7 @@ import type { AppState } from "./types";
 import {
   addRoommateToState,
   addTurnToState,
-  ensureMidnightCaughtUp,
+  syncCarryChain,
   removeLastTurnFromState,
   removeRoommateFromState,
   recalculateBalancesFromDate,
@@ -61,11 +61,16 @@ export function authorizeMutation(
   }
 }
 
-function finishMutation(state: AppState, action: MutateAction): AppState {
-  return action.type === "recalculateFromDate" ? state : ensureMidnightCaughtUp(state);
+function finishMutation(state: AppState, asOfToday: string): AppState {
+  return syncCarryChain(state, asOfToday);
 }
 
-export function applyMutation(state: AppState, action: MutateAction): AppState {
+export function applyMutation(
+  state: AppState,
+  action: MutateAction,
+  asOfToday?: string
+): AppState {
+  const calToday = asOfToday ?? today();
   let next: AppState;
   switch (action.type) {
     case "addTurn":
@@ -73,7 +78,7 @@ export function applyMutation(state: AppState, action: MutateAction): AppState {
       break;
     case "setAttendance": {
       next = setAttendanceInState(state, action.date, action.roommateId, action.status);
-      if (action.date < today()) next = recalculateBalancesFromDate(next, action.date);
+      if (action.date < calToday) next = recalculateBalancesFromDate(next, action.date, calToday);
       break;
     }
     case "addRoommate":
@@ -93,15 +98,15 @@ export function applyMutation(state: AppState, action: MutateAction): AppState {
       break;
     case "setTurnCount": {
       next = setRoommateTurnCountInState(state, action.date, action.roommateId, action.count);
-      if (action.date < today()) next = recalculateBalancesFromDate(next, action.date);
+      if (action.date < calToday) next = recalculateBalancesFromDate(next, action.date, calToday);
       break;
     }
     case "recalculateFromDate":
-      next = recalculateBalancesFromDate(state, action.fromDate);
-      return ensureMidnightCaughtUp(next);
+      next = recalculateBalancesFromDate(state, action.fromDate, calToday);
+      return next;
     case "setBalance": {
       next = setRoommateBalanceInState(state, action.date, action.roommateId, action.balance);
-      if (action.date < today()) next = recalculateBalancesFromDate(next, action.date);
+      if (action.date < calToday) next = recalculateBalancesFromDate(next, action.date, calToday);
       break;
     }
     case "removeLastTurn":
@@ -110,5 +115,5 @@ export function applyMutation(state: AppState, action: MutateAction): AppState {
     default:
       return state;
   }
-  return finishMutation(next, action);
+  return finishMutation(next, calToday);
 }

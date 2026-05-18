@@ -16,10 +16,12 @@ Data is stored on the server (not in each browser), so all devices stay in sync.
 
 - Tap your name and enter your password (set one in **Profile** if you have not yet).
 - **Admin sign in** (bottom of login screen): full control — add/remove roommates, set anyone present or away.
-- Each roommate can change **only their own** password in **Profile**.
+- Each roommate can change **their own** password, name, and emoji in **Profile**.
 - First admin visit: enter a password on the Admin screen to lock the app, or set it later under **Admin** → password.
 
 Set `SESSION_SECRET` in Vercel environment variables for production (any long random string).
+
+Optional: set `NEXT_PUBLIC_AQUASHIFT_TZ` to your household IANA timezone (e.g. `Asia/Karachi`) so midnight owed/credit rollover matches your calendar day on the server. The app also sends each device’s timezone automatically.
 
 ## Manage roommates (admin only)
 

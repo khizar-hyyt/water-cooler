@@ -1,9 +1,11 @@
 import type { ActivityEntry, AppState, DayData, Roommate, TimelineItem, Turn } from "./types";
+import { calendarToday, resolveTimeZone } from "./timezone";
 
 export type { AppState, DayData, Roommate, Turn } from "./types";
 export { DEFAULT_ROOMMATES, EMOJI_OPTIONS, COLOR_OPTIONS, createDefaultState } from "./types";
+export { calendarToday, resolveTimeZone, TZ_HEADER } from "./timezone";
 
-/** YYYY-MM-DD in the user's local timezone (not UTC). */
+/** YYYY-MM-DD from a Date in local JS timezone (used only for addDays math anchor). */
 export function formatLocalDate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -11,8 +13,9 @@ export function formatLocalDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-export function today(): string {
-  return formatLocalDate(new Date());
+/** Calendar today in the household timezone (see NEXT_PUBLIC_AQUASHIFT_TZ or browser TZ). */
+export function today(timeZone?: string): string {
+  return calendarToday(timeZone ?? resolveTimeZone());
 }
 
 /** Add days to a YYYY-MM-DD string (local calendar). */
@@ -197,19 +200,39 @@ function closingCarryForDay(state: AppState, date: string): Record<string, numbe
   return newCarry;
 }
 
+function carryMapsEqual(
+  expected: Record<string, number>,
+  actual: Record<string, number>,
+  roommateIds: string[]
+): boolean {
+  for (const id of roommateIds) {
+    if (intBalance(expected[id] ?? 0) !== intBalance(actual[id] ?? 0)) return false;
+  }
+  return true;
+}
+
+/** Close one day: write end-of-day owed/credit into the next day's opening carry. */
+export function closeDayCarry(state: AppState, date: string): AppState {
+  const newCarry = closingCarryForDay(state, date);
+  let next = rollCarryToNextDay(state, date, newCarry);
+  const ran = next.midnightRan.includes(date) ? next.midnightRan : [...next.midnightRan, date];
+  return { ...next, midnightRan: ran };
+}
+
 export function runMidnightCalcOnState(
   state: AppState,
   date: string,
   options?: { force?: boolean }
 ): AppState {
-  if (!options?.force && state.midnightRan.includes(date)) return state;
+  const ids = state.roommates.map((r) => r.id);
+  const expected = closingCarryForDay(state, date);
+  const actual = getMissedCarry(state, addDays(date, 1));
 
-  const newCarry = closingCarryForDay(state, date);
-  let next = rollCarryToNextDay(state, date, newCarry);
-  const ran = next.midnightRan.includes(date)
-    ? next.midnightRan
-    : [...next.midnightRan, date];
-  return { ...next, midnightRan: ran };
+  if (!options?.force && state.midnightRan.includes(date) && carryMapsEqual(expected, actual, ids)) {
+    return state;
+  }
+
+  return closeDayCarry(state, date);
 }
 
 export function firstActivityDate(state: AppState): string | null {
@@ -223,48 +246,48 @@ export function firstActivityDate(state: AppState): string | null {
   return min;
 }
 
-/** True when yesterday was closed out but opening carry for today is missing (old midnight bug). */
-export function needsMidnightRepair(state: AppState): boolean {
-  const end = today();
-  const y = addDays(end, -1);
-  if (!state.midnightRan.includes(y)) return false;
-
-  const closing = getScores(state, y).some((s) => s.balance !== 0);
-  if (!closing) return false;
-
-  const opening = getMissedCarry(state, end);
-  const hasOpening = Object.values(opening).some((v) => intBalance(v) !== 0);
-  return !hasOpening;
-}
-
-/** Run midnight for any past day not yet processed; repair broken carry from yesterday. */
-export function ensureMidnightCaughtUp(state: AppState): AppState {
-  const end = today();
+/**
+ * Ensure each past day's closing owed/credit is stored as the next day's opening carry.
+ * Re-runs when carry is missing/wrong (fixes midnight skips and server UTC vs local day).
+ */
+export function syncCarryChain(state: AppState, asOfToday?: string): AppState {
+  const end = asOfToday ?? today();
   const first = firstActivityDate(state);
   if (!first) return state;
 
+  const ids = state.roommates.map((r) => r.id);
   let next = state;
   let d = first;
+
   while (d < end) {
+    const expected = closingCarryForDay(next, d);
+    const tDate = addDays(d, 1);
+    const actual = getMissedCarry(next, tDate);
+
+    if (!carryMapsEqual(expected, actual, ids)) {
+      next = rollCarryToNextDay(next, d, expected);
+    }
     if (!next.midnightRan.includes(d)) {
-      next = runMidnightCalcOnState(next, d);
+      next = { ...next, midnightRan: [...next.midnightRan, d] };
     }
     d = addDays(d, 1);
-  }
-
-  if (needsMidnightRepair(next)) {
-    const y = addDays(end, -1);
-    if (y >= first) {
-      next = runMidnightCalcOnState(next, y, { force: true });
-    }
   }
 
   return next;
 }
 
-/** Replay midnight from a past date through yesterday so today's owed/credit reflect edits. */
-export function recalculateBalancesFromDate(state: AppState, fromDate: string): AppState {
-  const end = today();
+/** @deprecated Use syncCarryChain */
+export function ensureMidnightCaughtUp(state: AppState, asOfToday?: string): AppState {
+  return syncCarryChain(state, asOfToday);
+}
+
+/** Replay carry from a past date through today so owed/credit match edits. */
+export function recalculateBalancesFromDate(
+  state: AppState,
+  fromDate: string,
+  asOfToday?: string
+): AppState {
+  const end = asOfToday ?? today();
   if (fromDate >= end) return state;
 
   let next: AppState = {
@@ -274,17 +297,12 @@ export function recalculateBalancesFromDate(state: AppState, fromDate: string): 
 
   const newDays = { ...next.days };
   for (const key of Object.keys(newDays)) {
-    if (key >= fromDate) {
-      newDays[key] = { ...newDays[key], missedCarry: {} };
+    if (key > fromDate) {
+      newDays[key] = { ...getDayData(next, key), missedCarry: {} };
     }
   }
   next = { ...next, days: newDays };
-
-  let d = fromDate;
-  while (d < end) {
-    next = runMidnightCalcOnState(next, d, { force: true });
-    d = addDays(d, 1);
-  }
+  next = syncCarryChain(next, end);
 
   return appendActivity(
     next,

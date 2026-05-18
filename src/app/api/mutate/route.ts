@@ -4,6 +4,7 @@ import { applyMutation, authorizeMutation, type MutateAction } from "@/lib/mutat
 import { getAuthData, setAuthData } from "@/lib/auth-store";
 import { getServerState, saveServerState } from "@/lib/server-state";
 import { normalizeState } from "@/lib/types";
+import { calendarToday, resolveTimeZone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -37,8 +38,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: denied }, { status: 403 });
     }
 
+    const calToday = calendarToday(resolveTimeZone(request));
     const state = normalizeState(await getServerState());
-    const applied = applyMutation(state, action);
+    const applied = applyMutation(state, action, calToday);
     const next = normalizeState({
       ...applied,
       revision: (state.revision ?? 0) + 1,
